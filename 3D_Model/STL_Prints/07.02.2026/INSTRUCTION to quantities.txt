@@ -1,0 +1,20 @@
+Roller_2.1 - x32 (ideally x40)
+Driven_Gear - x4
+Gearbox_Housing - x4
+Gearbox_Housing_Cap - x4
+Lead Gear - x4
+Lead_Gear_Cap - x4
+Lock - x4
+Middle_1mm - x16 (ideally x20)
+Middle_2.1mm - x8 (ideally x10)
+
+If not possible all at once, then the first print must contain AT LEAST:
+Roller_2.1 - x8
+Driven_Gear - x1
+Gearbox_Housing - x1
+Gearbox_Housing_Cap - x1
+Lead Gear - x1
+Lead_Gear_Cap - x1
+Lock - x1
+Middle_1mm - x4
+Middle_2.1mm - x2
