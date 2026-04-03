@@ -1,0 +1,69 @@
+import time
+from pynput import keyboard
+import serial
+
+PORT = "/dev/ttyACM0"   # <-- change this
+BAUD = 115200
+
+ser = serial.Serial(PORT, BAUD, timeout=0.1)
+time.sleep(2)  # allow Arduino to reset
+
+pressed = set()
+
+def send(cmd: str):
+    ser.write(cmd.encode("utf-8"))
+
+def update_motion():
+    # Priority: rotation + translation combined (send one char)
+    # If you want true mixing on PC side, tell me and I’ll do Vx/Vy/W streaming.
+    if 'w' in pressed and 'a' in pressed:
+        send('y')  # up-left (only if you kept y/u/n/b in Arduino code; otherwise remove)
+    elif 'w' in pressed and 'd' in pressed:
+        send('u')  # up-right
+    elif 's' in pressed and 'a' in pressed:
+        send('b')  # down-left
+    elif 's' in pressed and 'd' in pressed:
+        send('n')  # down-right
+    elif 'w' in pressed:
+        send('w')
+    elif 's' in pressed:
+        send('s')
+    elif 'a' in pressed:
+        send('a')
+    elif 'd' in pressed:
+        send('d')
+    elif 'q' in pressed:
+        send('q')
+    elif 'e' in pressed:
+        send('e')
+    else:
+        send('x')  # stop
+
+def on_press(key):
+    try:
+        k = key.char.lower()
+    except AttributeError:
+        return
+
+    if k in ['w','a','s','d','q','e']:
+        pressed.add(k)
+        update_motion()
+    elif k in list("0123456789"):
+        send(k)  # speed
+    elif k == 'x':
+        pressed.clear()
+        send('x')
+
+def on_release(key):
+    try:
+        k = key.char.lower()
+    except AttributeError:
+        return
+
+    if k in pressed:
+        pressed.remove(k)
+        update_motion()
+
+print("Controls: WASD move, Q/E rotate, 0..9 speed, X stop. Ctrl+C to quit.")
+with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+    listener.join()
