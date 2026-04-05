@@ -119,7 +119,7 @@ uint8_t selectedTestMode = 1;
 int clampInt(int v, int lo, int hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
-  return v;
+  return v;F
 }
 
 String formatX100(int value) {
@@ -654,9 +654,6 @@ void setup() {
   activeSettings.testMode = 1;
 
   workingSettings = activeSettings;
-}
-
-void loop() {
   int delta = consumeEncoderDelta();
   ButtonEvent btn = pollButtonEvent();
 
@@ -695,4 +692,9 @@ void loop() {
   drawUI();
 
   delay(10);
+}
+
+void loop() 
+{
+  
 }
