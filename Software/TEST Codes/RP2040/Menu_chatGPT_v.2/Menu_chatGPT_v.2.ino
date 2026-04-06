@@ -63,7 +63,7 @@ ButtonState buttonState;
 // ======================================================
 enum class AppMode : uint8_t {
   MenuSetup,
-  Running
+  Runningw:\Desktop\OLED_DiagTest_RP2040.ino
 };
 
 enum class Screen : uint8_t {
