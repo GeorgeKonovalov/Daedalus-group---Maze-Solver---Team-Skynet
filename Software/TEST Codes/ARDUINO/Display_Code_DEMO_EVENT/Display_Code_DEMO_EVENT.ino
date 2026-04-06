@@ -50,7 +50,7 @@ void loop() {
   // display.setFont();
 }
 
-void Show_Event_Data(char event,           // single char instead of char*
+void Show_Event_Data(char event,           // single char instead of char*c:\Users\Администратор\OneDrive - Loughborough University\MAZE SOLVER GITHUB\Daedalus-group---Maze-Solver---Team-Skynet\Software\TEST Codes\RP2040\Menu_chatGPT\Menu_chatGPT.ino
                      int event_number,
                      bool IR_front_right,
                      bool IR_front_left,
