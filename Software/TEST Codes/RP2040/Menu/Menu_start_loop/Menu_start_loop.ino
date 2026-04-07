@@ -1,7 +1,20 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <U8g2lib.h>
+// ======================================================
+// Runtime / trial timing globals
+// ======================================================
+uint32_t executionStartMs = 0;
+uint32_t cycleStartMs = 0;
+uint32_t frozenExecutionDurationMs = 0;
 
+uint32_t time_first_trial = 0;
+uint32_t time_second_trial = 0;
+uint32_t time_third_trial = 0;
+uint32_t total_cycle_time = 0;
+
+bool modeSequenceStarted = false;
+bool modeSequenceFinished = false;
 // ======================================================
 // Hardware pins
 // ======================================================
@@ -582,10 +595,21 @@ void drawRootScreen() {
 void drawStartConfirmScreen() {
   drawHeader(getModeTopText());
 
-  u8g2.setFont(u8g2_font_logisoso20_tf);
-  u8g2.drawStr(18, 38, "START");
+  u8g2.setFont(u8g2_font_logisoso16_tf);
+  u8g2.drawStr(20, 30, "START");
 
   u8g2.setFont(u8g2_font_5x8_tf);
+
+  if (gMode == 1 && modeSequenceStarted && !modeSequenceFinished) {
+    String nextLine = "Next: " + String(submodeToString(mode1SubMode));
+    u8g2.drawStr(0, 42, nextLine.c_str());
+  }
+
+  if (modeSequenceFinished) {
+    String totalLine = "Total: " + formatMsAsSeconds(total_cycle_time);
+    u8g2.drawStr(0, 42, totalLine.c_str());
+  }
+
   u8g2.drawStr(0, 54, "Short press: run");
   u8g2.drawStr(0, 63, "Long press: root");
 }
@@ -743,20 +767,169 @@ void updateExecutionLogic() {
     uint32_t elapsedMs = millis() - executionStartMs;
 
     //if (elapsedMs >= (uint32_t)(gThresholdTime * 1000.0f)) { Kamal - this part triggers Finish on the screen, make sure when the Finish is reached this commented code is executed
-    //  setExecutionEvent(EventName::Finish); ## This part is to display events
-    //  stopExecutionNow(); - NO STOP WHEN NOT FINISH + save the time elapsedMS in global and add to the sum
+    setExecutionEvent(EventName::Finish);// ## This part is to display events
+    stopExecutionNow();// - NO STOP WHEN NOT FINISH + save the time elapsedMS in global and add to the sum
     //}
   }
 }
 
-void ScreenLoopUpdate(const char* event_name = "Straight"; uint8_t mode_number = 1; uint8_t submode_index = ; uint32_t Start_time)
-{
+Mode1SubMode fixedSubmodeForMode(uint8_t mode) {
+  switch (mode) {
+    case 2: return Mode1SubMode::RightTurn;
+    case 3: return Mode1SubMode::LeftTurn;
+    case 4: return Mode1SubMode::Selection;
+    default: return Mode1SubMode::RightTurn;
+  }
+}
 
+const char* submodeToString(Mode1SubMode sm) {
+  switch (sm) {
+    case Mode1SubMode::RightTurn: return "Right Turn";
+    case Mode1SubMode::LeftTurn:  return "Left Turn";
+    case Mode1SubMode::Selection: return "Selection";
+    default: return "Unknown";
+  }
+}
+
+EventName eventForSubmode(Mode1SubMode sm) {
+  switch (sm) {
+    case Mode1SubMode::RightTurn: return EventName::RightTurn;
+    case Mode1SubMode::LeftTurn:  return EventName::LeftTurn;
+    case Mode1SubMode::Selection: return EventName::Start; // no Selection event in your EventName list
+    default:                      return EventName::Start;
+  }
+}
+
+void resetCycleTimes() {
+  time_first_trial = 0;
+  time_second_trial = 0;
+  time_third_trial = 0;
+  total_cycle_time = 0;
+  frozenExecutionDurationMs = 0;
+}
+
+void ScreenLoopUpdate(EventName event_name = EventName::Start, bool stop_machine = false) {
+  ButtonEvent btn = pollButtonEvent();
+
+  // --------------------------------------------------
+  // CASE 1: machine is NOT running
+  // stay on StartConfirm and wait for button press
+  // --------------------------------------------------
+  if (!Execution_state) {
+    currentScreen = Screen::StartConfirm;
+
+    if (btn == ButtonEvent::ShortPress) {
+      // Start / restart next trial
+      if (gMode == 1) {
+        // Start a new 3-step cycle only if not already in progress
+        // or if the previous one fully finished
+        if (!modeSequenceStarted || modeSequenceFinished) {
+          resetCycleTimes();
+          modeSequenceStarted = true;
+          modeSequenceFinished = false;
+          cycleStartMs = millis();
+          mode1SubMode = Mode1SubMode::RightTurn;
+        }
+        // else: keep current mode1SubMode as the next pending leg
+      } else {
+        // Modes 2,3,4 are single-stage cycles
+        resetCycleTimes();
+        modeSequenceStarted = true;
+        modeSequenceFinished = false;
+        cycleStartMs = millis();
+        mode1SubMode = fixedSubmodeForMode(gMode);
+      }
+
+      executionStartMs = millis();
+      frozenExecutionDurationMs = 0;
+      Execution_state = true;
+      currentScreen = Screen::RunScreen;
+
+      // Set initial event for the leg being started
+      setExecutionEvent(eventForSubmode(mode1SubMode));
+    }
+
+    if (btn == ButtonEvent::LongPress) {
+      currentScreen = Screen::Root;
+    }
+
+    drawUI();
+    return;
+  }
+
+  // --------------------------------------------------
+  // CASE 2: machine is RUNNING
+  // update displayed event and run screen
+  // --------------------------------------------------
+  currentScreen = Screen::RunScreen;
+  setExecutionEvent(event_name);
+
+  // If stop is requested, freeze timer immediately,
+  // store trial time(s), go to StartConfirm and wait.
+  if (stop_machine) {
+    uint32_t finishTime = millis() - executionStartMs;
+    frozenExecutionDurationMs = finishTime;
+
+    switch (gMode) {
+      case 1:
+        switch (mode1SubMode) {
+          case Mode1SubMode::RightTurn:
+            time_first_trial = finishTime;
+            mode1SubMode = Mode1SubMode::LeftTurn;   // next leg
+            break;
+
+          case Mode1SubMode::LeftTurn:
+            time_second_trial = finishTime;
+            mode1SubMode = Mode1SubMode::Selection;  // next leg
+            break;
+
+          case Mode1SubMode::Selection:
+            time_third_trial = finishTime;
+            total_cycle_time = millis() - cycleStartMs;
+            modeSequenceFinished = true;
+            mode1SubMode = Mode1SubMode::RightTurn;  // prepare next full cycle
+            break;
+        }
+        break;
+
+      case 2:
+        time_first_trial = finishTime;
+        total_cycle_time = finishTime;
+        modeSequenceFinished = true;
+        break;
+
+      case 3:
+        time_second_trial = finishTime;
+        total_cycle_time = finishTime;
+        modeSequenceFinished = true;
+        break;
+
+      case 4:
+        time_third_trial = finishTime;
+        total_cycle_time = finishTime;
+        modeSequenceFinished = true;
+        break;
+    }
+
+    // Show finish event on stop
+    setExecutionEvent(EventName::Finish);
+
+    // Stop immediately and go back to start screen
+    Execution_state = false;
+    currentScreen = Screen::StartConfirm;
+
+    drawUI();
+    return;
+  }
+
+  // Still running
+  drawUI();
 }
 
 // ======================================================
 // Arduino setup / loop
 // ======================================================
+
 void setup() {
   pinMode(ENC_A_PIN, INPUT_PULLUP);
   pinMode(ENC_B_PIN, INPUT_PULLUP);
@@ -781,33 +954,36 @@ void setup() {
 }
 
 void loop() {
-  ButtonEvent btn = pollButtonEvent();
+  // --------------------------------------------------
+  // YOUR machine logic determines:
+  // 1. current event to display
+  // 2. whether machine should stop now
+  // --------------------------------------------------
 
-  if (Execution_state) {
-    updateExecutionLogic();
-    currentScreen = Screen::RunScreen;
-  } else {
-    // Immediately go to start screen after stop
-    currentScreen = Screen::StartConfirm;
-    handleStartConfirmInput(btn);
-  }
-  drawUI();
+  EventName displayedEvent = EventName::Straight;
+  bool stopNow = false;
 
-  // Debug output
-  Serial.print("P=");
-  Serial.print(gP, 2);
-  Serial.print(" I=");
-  Serial.print(gI, 2);
-  Serial.print(" D=");
-  Serial.print(gD, 2);
-  Serial.print(" T=");
-  Serial.print(gThresholdTime, 2);
+  // Example logic:
+  // displayedEvent = EventName::LeftTurn;
+  // if (some_finish_condition) stopNow = true;
+
+  ScreenLoopUpdate(displayedEvent, stopNow);
+
+  // Optional debug
+  Serial.print("Exec=");
+  Serial.print(Execution_state ? "1" : "0");
   Serial.print(" Mode=");
   Serial.print(gMode);
-  Serial.print(" Event=");
+  Serial.print(" CurrentEvent=");
   Serial.print(eventNameToString(currentEventName));
-  Serial.print(" Exec=");
-  Serial.println(Execution_state ? "1" : "0");
+  Serial.print(" T1=");
+  Serial.print(time_first_trial);
+  Serial.print(" T2=");
+  Serial.print(time_second_trial);
+  Serial.print(" T3=");
+  Serial.print(time_third_trial);
+  Serial.print(" Total=");
+  Serial.println(total_cycle_time);
 
   delay(20);
 }
