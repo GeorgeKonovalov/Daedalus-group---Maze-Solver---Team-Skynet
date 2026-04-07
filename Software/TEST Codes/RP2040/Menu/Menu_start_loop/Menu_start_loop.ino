@@ -749,6 +749,11 @@ void updateExecutionLogic() {
   }
 }
 
+void ScreenLoopUpdate(const char* event_name = "Straight"; uint8_t mode_number = 1; uint8_t submode_index = ; uint32_t Start_time)
+{
+
+}
+
 // ======================================================
 // Arduino setup / loop
 // ======================================================
