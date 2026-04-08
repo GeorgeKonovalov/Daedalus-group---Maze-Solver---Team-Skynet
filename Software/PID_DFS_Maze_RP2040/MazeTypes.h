@@ -59,10 +59,13 @@ struct Event {
 // =====================================================================
 enum RobotState : uint8_t {
     ST_STARTUP,
-    ST_SCAN_EVENT,    // stopped at event, reading sensors
-    ST_DECIDE,        // DFS picking next direction
-    ST_FOLLOWING,     // PID corridor following to next event
-    ST_COMPLETE       // maze fully explored
+    ST_WAIT_FOR_ENTRY,  // motors off, outside maze, waiting to detect open space
+    ST_ENTERING,        // driving forward into maze, waiting for first wall
+    ST_SCAN_EVENT,      // stopped at event, reading sensors
+    ST_DECIDE,          // DFS picking next direction
+    ST_FOLLOWING,       // PID corridor following to next event
+    ST_COMPLETE,        // run finished — exited maze
+    ST_COOLDOWN         // waiting between runs (20s for repositioning)
 };
 
 #endif
