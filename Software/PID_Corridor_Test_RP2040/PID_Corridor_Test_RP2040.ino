@@ -189,6 +189,15 @@ void loop() {
     // PID correction applied as lateral (Vx) movement
     float correction = calculatePID(error);
 
+    // Stop if front wall detected
+    if (distN <= 8.0f) {
+        stopAll();
+        Serial.print("WALL AHEAD — STOPPED  N:");
+        Serial.println(distN, 1);
+        delay(500);
+        return;
+    }
+
     // Drive north with lateral correction
     drive(correction, FORWARD_SPEED, 0);
 
