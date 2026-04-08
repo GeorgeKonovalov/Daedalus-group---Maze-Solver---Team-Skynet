@@ -30,10 +30,10 @@ int RANGE_FL = 90, RANGE_FR = 90, RANGE_RR = 90, RANGE_RL = 90;
 int INV_FL = +1,   INV_FR = +1,   INV_RR = +1,   INV_RL = +1;
 
 // ===== SPEED EQUALIZATION GAINS =====
-const float GAIN_FL =  0.951f;
-const float GAIN_FR = -0.901f;
+const float GAIN_FL =  0.964f;
+const float GAIN_FR = -0.707f;
 const float GAIN_RR = -1.000f;
-const float GAIN_RL =  0.938f;
+const float GAIN_RL =  0.688f;
 
 // ===== SENSOR READINGS =====
 float distN = 30.0f, distE = 30.0f, distS = 30.0f, distW = 30.0f;
