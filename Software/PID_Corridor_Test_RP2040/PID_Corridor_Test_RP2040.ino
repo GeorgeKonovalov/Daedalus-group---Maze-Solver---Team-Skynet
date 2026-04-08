@@ -110,9 +110,9 @@ void parseDistances(String data) {
     int comma3 = data.indexOf(',', idx3);
 
     if (idx1 > 2 && idx2 > 2 && idx3 > 2 && idx4 > 2) {
-        distN = data.substring(idx1, comma1).toFloat();
+        distS = data.substring(idx1, comma1).toFloat();
         distE = data.substring(idx2, comma2).toFloat();
-        distS = data.substring(idx3, comma3).toFloat();
+        distN = data.substring(idx3, comma3).toFloat();
         distW = data.substring(idx4).toFloat();
     }
 }
