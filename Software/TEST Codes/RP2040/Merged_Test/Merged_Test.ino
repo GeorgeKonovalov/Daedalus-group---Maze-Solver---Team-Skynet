@@ -29,9 +29,9 @@ constexpr uint32_t BUTTON_LONGPRESS_MS = 700;
 // Settings storage (fixed-point x100)
 // ======================================================
 struct RuntimeSettings {
-  int p_x100 = 125;              // 1.25
-  int i_x100 = 5;                // 0.05
-  int d_x100 = 20;               // 0.20
+  int p_x100 = 7;              // 1.25
+  int i_x100 = 0;                // 0.05
+  int d_x100 = 0;               // 0.20
   int thresholdTime_x100 = 150;  // 1.50
   uint8_t mode = 1;              // 1..4
 };
@@ -169,10 +169,10 @@ int RANGE_FL = 90, RANGE_FR = 90, RANGE_RR = 90, RANGE_RL = 90;
 int INV_FL = +1,   INV_FR = +1,   INV_RR = +1,   INV_RL = +1;
 
 // ===== SPEED EQUALIZATION GAINS =====
-const float GAIN_FL =  0.951f;
-const float GAIN_FR = -0.901f;
+const float GAIN_FL =  0.964f;
+const float GAIN_FR = -0.707f;
 const float GAIN_RR = -1.000f;
-const float GAIN_RL =  0.938f;
+const float GAIN_RL =  0.688f;
 
 // ===== SENSOR READINGS =====
 float distN = 30.0f, distE = 30.0f, distS = 30.0f, distW = 30.0f;
@@ -1008,9 +1008,9 @@ void parseDistances(String data) {
   int comma3 = data.indexOf(',', idx3);
 
   if (idx1 > 2 && idx2 > 2 && idx3 > 2 && idx4 > 2 && comma1 > 0 && comma2 > 0 && comma3 > 0) {
-    distN = data.substring(idx3, comma3).toFloat();
+    distN = data.substring(idx1, comma3).toFloat();
     distE = data.substring(idx2, comma2).toFloat();
-    distS = data.substring(idx1, comma1).toFloat(); 
+    distS = data.substring(idx3, comma1).toFloat(); 
     distW = data.substring(idx4).toFloat();
   }
 }
