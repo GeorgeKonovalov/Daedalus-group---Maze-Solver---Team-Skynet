@@ -1127,9 +1127,9 @@ void setup() {
   stopAll();
 
   // initial menu values
-  activeSettings.p_x100 = 125;
-  activeSettings.i_x100 = 5;
-  activeSettings.d_x100 = 20;
+  activeSettings.p_x100 = 7;
+  activeSettings.i_x100 = 0;
+  activeSettings.d_x100 = 0;
   activeSettings.thresholdTime_x100 = 150;
   activeSettings.mode = 1;
 
