@@ -1008,9 +1008,9 @@ void parseDistances(String data) {
   int comma3 = data.indexOf(',', idx3);
 
   if (idx1 > 2 && idx2 > 2 && idx3 > 2 && idx4 > 2 && comma1 > 0 && comma2 > 0 && comma3 > 0) {
-    distN = data.substring(idx1, comma3).toFloat();
+    distN = data.substring(idx1, comma1).toFloat();
     distE = data.substring(idx2, comma2).toFloat();
-    distS = data.substring(idx3, comma1).toFloat(); 
+    distS = data.substring(idx3, comma3).toFloat(); 
     distW = data.substring(idx4).toFloat();
   }
 }
@@ -1075,8 +1075,8 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
     return;
   }
 
-  // Corridor centering: positive = too far east
-  float error = distW - distE;
+  // Corridor centering: positive = too far west
+  float error = distE - distW;
   float correction = calculatePID(error);
 
   // Example stop condition: wall ahead
@@ -1154,8 +1154,8 @@ void loop() {
   T_threshold = gThresholdTime;
   if (!readSensorsUART()) return;
 
-  // Centering error: positive = robot is too far east
-  float error = distW - distE;
+  // Centering error: positive = robot is too far west
+  float error = distE - distW;
 
     // PID correction applied as lateral (Vx) movement
   float correction = calculatePID(error);
