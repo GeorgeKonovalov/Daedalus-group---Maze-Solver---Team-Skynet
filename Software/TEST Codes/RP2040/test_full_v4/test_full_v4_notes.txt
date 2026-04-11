@@ -1,0 +1,18 @@
+test_full_v4
+
+Base:
+- Created as a fresh follow-up version after the in-place v3 updates.
+
+Updated INO:
+- test_full_v4.ino
+
+Main changes in this version:
+- Remapped IR sensors to robot-coherent locations: NW=RL, NE=RR, SW=FL, SE=FR.
+- Rebuilt the Event Test system around a submenu plus per-event configuration.
+- Added direction selection (N, E, S, W) to all event test configs.
+- Added configurable test flows for Dead-end, Left Turn, Right Turn, T-Junction, Corridor, Finish, Start, and T-Junction Straight.
+- Added the Random event where the system identifies the encountered event on its own and reacts to it.
+
+Files:
+- test_full_v4.ino
+- test_full_v4_notes.txt

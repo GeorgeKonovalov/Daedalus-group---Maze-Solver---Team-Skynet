@@ -1,0 +1,17 @@
+test_full_v10
+
+Base:
+- Reworked event-detection and execution branch after the v9 testing stage.
+
+Updated INO:
+- test_full_v10.ino
+
+Main changes in this version:
+- Rebuilt the event-identification tree so the code acts only when the sensor data supports one clear event.
+- Added separate settings for Stop distance, Wall threshold, Turning threshold, and PID wall-distance target.
+- Added wall-aware control that selects between two-wall PID, one-wall PID, and straight fallback based on visible side walls.
+- Updated main execution and event tests to use the new event tree and wall-reacquisition strategy after turns.
+
+Files:
+- test_full_v10.ino
+- test_full_v10_notes.txt

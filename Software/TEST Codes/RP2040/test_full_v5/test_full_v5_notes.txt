@@ -1,0 +1,21 @@
+test_full_v5
+
+Base:
+- Expanded the v4 event-test framework with more robust sensor-trigger handling.
+
+Updated INO:
+- test_full_v5.ino
+
+Main changes in this version:
+- Added global IR-related settings for stable event confirmation and dead-end detection.
+- Introduced shared sensor snapshots and stable event classification used by both execution logic and event tests.
+- Added IR Test menu entries for live IR readings, IR Time, and DeadEnd tuning.
+- Kept the Random event and the configurable event-test state machine with Direction, Stop, Side, Act, and Move parameters.
+- Added interrupt-aware IR handling infrastructure as part of the move toward filtered event triggering.
+
+Notes:
+- This version is an intermediate trigger-logic step between the event-test expansion in v4 and the more consolidated stable-event path in v6.
+
+Files:
+- test_full_v5.ino
+- test_full_v5_notes.txt

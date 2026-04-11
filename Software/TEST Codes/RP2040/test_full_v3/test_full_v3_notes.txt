@@ -1,0 +1,21 @@
+test_full_v3
+
+Base:
+- First full menu-and-run integration branch for the RP2040 maze robot.
+
+Updated INO:
+- test_full_v3.ino
+
+Main changes in this version:
+- Fixed the start flow so pressing Start launches execution instead of briefly flashing the run screen and returning.
+- Added separate IR Test and Ultrasonic Test screens.
+- Expanded the execution screen to show mode, attempt, time, event, heading, ultrasonic readings, and IR readings.
+- Added a pre-start Event Test area with test cases for Corridor, T-Junction, Dead-end, Start, Finish, Left Turn, Right Turn, and T-Straight.
+- Added confirmation/start sequencing so trials can restart from the confirmation screen after Finish.
+
+Notes:
+- This version was updated in place before the later rule to always create a new version folder for each change.
+
+Files:
+- test_full_v3.ino
+- test_full_v3_notes.txt

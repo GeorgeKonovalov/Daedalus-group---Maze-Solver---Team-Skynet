@@ -1,0 +1,18 @@
+test_full_v6
+
+Base:
+- Consolidated the stable event-trigger filtering added around v5.
+
+Updated INO:
+- test_full_v6.ino
+
+Main changes in this version:
+- IR sensor changes raise an interrupt flag and events are confirmed only after readings stay unchanged for IR Time.
+- Added a dedicated dead-end trigger rule using stable IR state plus front ultrasonic distance at or below the DeadEnd threshold.
+- Published IR-related settings globally so the same values apply to start modes, event tests, and execution logic.
+- Main execution and event tests were switched onto the same stable snapshot and classification path.
+- Removed stale direct-detection handling so the filtered event path became the main trigger mechanism.
+
+Files:
+- test_full_v6.ino
+- test_full_v6_notes.txt

@@ -1,0 +1,26 @@
+test_full_v14
+
+Base:
+- Created from test_full_v13.ino
+
+Updated INO:
+- test_full_v14.ino
+
+New change in this version:
+- IR trigger polarity was inverted to match the robot wiring/logic requested by the user.
+- The code now treats 1 / HIGH as "triggered" and 0 / LOW as "untriggered".
+
+Functional effect:
+- buildIRMask() now sets a bit to 1 when the corresponding IR pin reads HIGH.
+- frontIRTriggered(), finishIRTriggered(), and all event-detection paths that depend on isIRTriggered() now follow the same meaning.
+- Event logic that uses IR masks should now match the user's expectation that "1 = wall detected".
+
+Key implementation detail:
+- In test_full_v14.ino, isIRTriggered(int value) was changed from:
+  return value == LOW;
+  to:
+  return value == HIGH;
+
+Files:
+- test_full_v14.ino
+- test_full_v14_notes.txt

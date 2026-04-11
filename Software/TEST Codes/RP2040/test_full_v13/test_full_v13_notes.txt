@@ -1,0 +1,17 @@
+test_full_v13
+
+Base:
+- Small follow-up version after the v12 trigger rewrite.
+
+Updated INO:
+- test_full_v13.ino
+
+Main changes in this version:
+- Decoupled the Finish threshold from the DeadEnd threshold.
+- Added a dedicated finishDistance setting and runtime global.
+- Updated event classification so Finish uses its own explicit threshold instead of being derived from two times the DeadEnd threshold.
+- Added Finish tuning to the IR Test menu and set the default Finish threshold to 30.00 cm.
+
+Files:
+- test_full_v13.ino
+- test_full_v13_notes.txt

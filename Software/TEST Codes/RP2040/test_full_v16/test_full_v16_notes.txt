@@ -1,0 +1,22 @@
+test_full_v16
+
+Base:
+- Created from test_full_v15.ino
+
+Updated INO:
+- test_full_v16.ino
+
+Main changes in this version:
+- Made Start an explicit begin-only synthetic state.
+- Sensor classification now documents that it never returns Start.
+- Event-test sensor matching was separated from the begin-only Start phase.
+- The Start test case was renamed to Auto Start so it is clearer that it is the automatic initial phase, not a sensor-triggered event.
+
+Behavior change:
+- Start appears automatically only at the beginning of an execution attempt or execution-state run.
+- Start is not treated as a sensor-classified event.
+- Event tests no longer semantically treat Start as something sensors are expected to produce.
+
+Files:
+- test_full_v16.ino
+- test_full_v16_notes.txt

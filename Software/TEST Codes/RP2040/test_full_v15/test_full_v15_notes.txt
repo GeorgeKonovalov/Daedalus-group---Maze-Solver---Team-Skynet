@@ -1,0 +1,29 @@
+test_full_v15
+
+Base:
+- Created from test_full_v14.ino
+
+Updated INO:
+- test_full_v15.ino
+
+Main changes in this version:
+- Replaced the old Maze Test visual screen with a centered digital-twin execution display.
+- Renamed the root menu entry from Maze Test to Execution State.
+- Added a symmetric robot view with:
+  - square robot body in the middle of the OLED
+  - round IR markers in the four corners
+  - empty corner marker when the coherent IR input is not triggered
+  - filled corner marker when the coherent IR input is triggered
+  - N / W / S / E labels inside the robot, rotated with the current maze-test heading
+- Added wall visualization around the robot:
+  - near wall segments from ultrasonic detection
+  - second outer wall-pair segments from coherent IR side-pair triggers
+  - separate front-wall visualization from the front ultrasonic logic
+- Added the requested 2-line bottom ultrasonic readout:
+  - N:xx.x S:xx.x
+  - W:xx.x E:xx.x
+- Kept the existing sensor-only maze/execution-state logic underneath the new display, so the behavior engine remains the same while the screen becomes a digital twin.
+
+Files:
+- test_full_v15.ino
+- test_full_v15_notes.txt

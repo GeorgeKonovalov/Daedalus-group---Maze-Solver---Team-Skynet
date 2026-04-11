@@ -1,0 +1,17 @@
+test_full_v11
+
+Base:
+- Debug and hardening pass on top of v10.
+
+Updated INO:
+- test_full_v11.ino
+
+Main changes in this version:
+- Changed stable-event gating to use threshold-zoned observations instead of raw ultrasonic deltas, reducing false resets from distance jitter.
+- Froze turn decisions at the moment an event is confirmed so the chosen turn cannot disappear before execution.
+- Improved wall-follow fallback behavior when one or both side walls are temporarily missing.
+- Hardened UART input handling and sensor-refresh flow to cope better with malformed or stale data.
+
+Files:
+- test_full_v11.ino
+- test_full_v11_notes.txt

@@ -1,0 +1,18 @@
+test_full_v8
+
+Base:
+- Built on top of the v7 event and trigger framework.
+
+Updated INO:
+- test_full_v8.ino
+
+Main changes in this version:
+- Added rolling-average ultrasonic processing for the four distance sensors.
+- Added the interpreted difference curve with tunable parameter b for shaping small PID errors.
+- Switched corridor PID to use interpreted averaged side error instead of the older raw direct difference.
+- Added a PID Test screen under PID settings where direction can be chosen and corrected live data can be observed.
+- Added a sensor-only Maze Test to validate detection, execution flow, Finish, and restart sequencing without driving motors.
+
+Files:
+- test_full_v8.ino
+- test_full_v8_notes.txt

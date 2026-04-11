@@ -1,0 +1,24 @@
+test_full_v17
+
+Base:
+- Created from test_full_v16.ino
+
+Updated INO:
+- test_full_v17.ino
+
+Main fixes in this version:
+- Fixed repeated dead-end retriggering in real execution and in the execution-state digital twin by consuming each stable event snapshot only once.
+- Made event classification use heading-aware IR corner interpretation instead of a fixed global front/rear assumption.
+- Relaxed left/right turn classification so a valid open side can trigger the turn even when the opposite side is not perfectly classified as a wall yet.
+- Improved T-junction and T-straight detection by tying the event logic to heading-relative front-corner changes.
+- Made the execution-state screen ignore button input while its run is active.
+- Made the real execution screen explicitly ignore button input while the robot is running.
+
+Behavior effect:
+- Dead-end should no longer make the heading flip back and forth continuously from the same confirmed snapshot.
+- Left / Right / T-Junction events should update more reliably when IR changes are stable.
+- The button should not interfere with active execution or the active execution-state twin run.
+
+Files:
+- test_full_v17.ino
+- test_full_v17_notes.txt

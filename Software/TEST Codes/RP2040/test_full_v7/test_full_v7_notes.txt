@@ -1,0 +1,18 @@
+test_full_v7
+
+Base:
+- Created from v6 as a compile-fix successor.
+
+Updated INO:
+- test_full_v7.ino
+
+Main changes in this version:
+- Fixed the C++ switch/case compile error in runSelectedEventTest() caused by a variable declaration crossing case labels.
+- Wrapped the Detect case in its own scope so the sketch compiles cleanly without changing the intended runtime behavior.
+
+Notes:
+- v7 is functionally the v6 logic with the event-test compile issue corrected.
+
+Files:
+- test_full_v7.ino
+- test_full_v7_notes.txt

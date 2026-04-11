@@ -1,0 +1,17 @@
+test_full_v12
+
+Base:
+- Trigger and execution rewrite after observing weaker event triggering in v10 and v11.
+
+Updated INO:
+- test_full_v12.ino
+
+Main changes in this version:
+- Rewrote the trigger path so event confirmation stabilizes on the classified candidate event rather than on raw sensor jitter.
+- Main execution, event tests, and maze test now read the current confirmed event continuously instead of depending on a brand-new edge only.
+- Applied averaged ultrasonic threshold checks consistently across classification and execution logic.
+- Added confirmation margins and acquire-wall timeout fallbacks so turn handling is less likely to stall.
+
+Files:
+- test_full_v12.ino
+- test_full_v12_notes.txt
