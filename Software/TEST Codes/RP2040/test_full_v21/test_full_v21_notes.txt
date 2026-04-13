@@ -1,0 +1,39 @@
+test_full_v21
+Base:
+- Created from test_full_v20.ino
+Updated INO:
+- test_full_v21.ino
+Main change in this version:
+- Restructured drive() to use proportional correction instead of flat additive correction.
+- Per-motor equalization gains now apply only to the forward component (Vy).
+- Lateral correction (Vx) is expressed as a ratio of the smallest equalized base speed, then scaled by a tunable constant.
+- This ensures all four motors experience the same proportional speed change during PID correction, regardless of individual gain values.
+Drive function changes:
+- Equalized base speeds computed per-motor: baseFL, baseFR, baseRR, baseRL = Vy × pairGain × motorGain.
+- Minimum base speed found across all four motors.
+- Correction ratio computed as Vx / minBase, then multiplied by CORRECTION_SCALE.
+- Final motor commands: pairA motors get base × (1 + ratio), pairB motors get base × (1 - ratio).
+- Normalisation applied after combining if any command exceeds ±1.0.
+New constant:
+- CORRECTION_SCALE = 1.40f added alongside existing movement constants (BASE_SPEED, CORRECTION_LIMIT, etc.).
+- Sets the default proportional correction strength to approximately 35% when all gains are 1.0.
+- Tunable: increasing above 1.40 makes corridor corrections more aggressive, decreasing makes them softer.
+Gain value changes:
+- fr_fwd_x100 changed from 72 to 100.
+- fr_back_x100 changed from 72 to 100.
+- rr_fwd_x100 changed from 94 to 100.
+- rr_back_x100 changed from 94 to 100.
+- rl_fwd_x100 changed from 68 to 100.
+- rl_back_x100 changed from 68 to 100.
+- fl_fwd_x100 and fl_back_x100 unchanged (already 100).
+Behavior effect:
+- Previously, the flat additive correction produced asymmetric lateral response: corrections that sped up the FL/RR pair (high gains) were significantly stronger than corrections that sped up the FR/RL pair (low gains).
+- Now, correction authority is symmetric in both directions regardless of per-motor gain spread.
+- If per-motor gains are re-tuned for straight-line tracking in future, the proportional correction will remain symmetric automatically.
+Important notes:
+- PID gains (Kp, Ki, Kd) and CORRECTION_LIMIT are unchanged but may need re-tuning since the correction now reaches all motors at full proportional strength.
+- CORRECTION_SCALE can be adjusted via the constant without touching drive() logic.
+- With all gains at 1.0, straight-line tracking relies entirely on mechanical alignment. If drift reappears, per-motor gains can be reintroduced without reintroducing the asymmetry.
+Files:
+- test_full_v21.ino
+- test_full_v21_notes.txt
