@@ -1,0 +1,23 @@
+test_full_v23
+Base:
+- Created from test_full_v22.ino
+
+Updated INO:
+- test_full_v23.ino
+
+Main fix in this version:
+- Cleaned the sketch packaging so the version folder contains only one Arduino source file.
+- This fixes the compile error where Arduino was compiling both `test_full_v21.ino` and `test_full_v22.ino` from the same folder and reporting mass redefinitions.
+
+Important note:
+- Arduino builds every `.ino` file in the sketch folder as part of the same sketch.
+- If two full copies of the project exist in one folder, every function, global, and setup/loop pair is compiled twice.
+- `v23` keeps the updated `v22` code, but places it in a clean folder with only:
+  - `test_full_v23.ino`
+  - `test_full_v23_notes.txt`
+  - `test_full_v23_settings_layout.csv`
+
+Files:
+- test_full_v23.ino
+- test_full_v23_notes.txt
+- test_full_v23_settings_layout.csv
