@@ -2788,23 +2788,29 @@ void stopAll() {
 
 // Actual drive path using runtime gains
 void drive(float Vx, float Vy) {
-  float pairA = Vy + Vx;  // FL + RR
-  float pairB = Vy - Vx;  // FR + RL
+  // Equalize forward component per-motor, then add correction unscaled
+  float pairGainA = (Vy >= 0.0f) ? gPairFLRRFwd : gPairFLRRBack;
+  float pairGainB = (Vy >= 0.0f) ? gPairFRRLFwd : gPairFRRLBack;
 
-  float m = max(fabs(pairA), fabs(pairB));
+  float baseFL = Vy * pairGainA * ((Vy >= 0.0f) ? gFLFwd : gFLBack);
+  float baseRR = Vy * pairGainA * ((Vy >= 0.0f) ? gRRFwd : gRRBack);
+  float baseFR = Vy * pairGainB * ((Vy >= 0.0f) ? gFRFwd : gFRBack);
+  float baseRL = Vy * pairGainB * ((Vy >= 0.0f) ? gRLFwd : gRLBack);
+
+  // Correction applied equally to both diagonal pairs
+  float fl = baseFL + Vx;
+  float rr = baseRR + Vx;
+  float fr = baseFR - Vx;
+  float rl = baseRL - Vx;
+
+  // Normalise if any command exceeds [-1, 1]
+  float m = max(max(fabs(fl), fabs(fr)), max(fabs(rr), fabs(rl)));
   if (m > 1.0f) {
-    pairA /= m;
-    pairB /= m;
+    fl /= m;
+    fr /= m;
+    rr /= m;
+    rl /= m;
   }
-
-  // Forward/back pair gains depend on sign of pair command
-  pairA *= (pairA >= 0.0f) ? gPairFLRRFwd : gPairFLRRBack;
-  pairB *= (pairB >= 0.0f) ? gPairFRRLFwd : gPairFRRLBack;
-
-  float fl = pairA * ((pairA >= 0.0f) ? gFLFwd : gFLBack);
-  float rr = pairA * ((pairA >= 0.0f) ? gRRFwd : gRRBack);
-  float fr = pairB * ((pairB >= 0.0f) ? gFRFwd : gFRBack);
-  float rl = pairB * ((pairB >= 0.0f) ? gRLFwd : gRLBack);
 
   writeCRServo(S_FL, STOP_FL, RANGE_FL, INV_FL, fl);
   writeCRServo(S_FR, STOP_FR, RANGE_FR, INV_FR, fr);
