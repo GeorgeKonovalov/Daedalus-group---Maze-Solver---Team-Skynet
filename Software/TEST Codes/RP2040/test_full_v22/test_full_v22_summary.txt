@@ -1,0 +1,22 @@
+test_full_v22
+Base:
+- Created from test_full_v21.ino
+
+Updated INO:
+- test_full_v22.ino
+
+Main changes:
+- Event Config now shows only the parameters that actually affect the selected event case.
+- Shared global thresholds and PID values are surfaced inside each event setup when they materially affect that event.
+- Menu labels are more explicit and include units where possible (`cm`, `s`, `x`).
+- The digit editor now shows two short help lines describing what the selected value changes.
+- Start Settings, Settings, PID, Motor Calibration, IR Test, and Event Test labels were clarified.
+- Added an Excel-friendly settings map file for navigation and documentation.
+
+Important note:
+- If a shared/global setting is edited from inside an event config screen, it still changes the shared runtime value for all runs and tests.
+
+Files:
+- test_full_v22.ino
+- test_full_v22_summary.txt
+- test_full_v22_settings_layout.csv

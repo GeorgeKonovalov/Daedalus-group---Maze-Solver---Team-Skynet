@@ -1,0 +1,48 @@
+Menu,Shown In,Display Name,Scope,Unit,Description
+Start Settings,All runs,Route Mode,Shared,mode,Selects the overall attempt-routing mode used when execution starts.
+Start Settings,All runs,Turn Wait(s),Shared,s,Pause after stopping at a wall before the heading change begins.
+Settings,All runs,Front Stop(cm),Shared,cm,Front ultrasonic stop distance used as the safety stop before turn handling.
+Settings,All runs,Corridor Wall(cm),Shared,cm,Maximum side distance that still counts as a visible wall for corridor PID selection.
+Settings,All runs,Turn Detect(cm),Shared,cm,Maximum front distance that can still be treated as a turn or junction instead of open space.
+Settings,All runs,Recheck Time(s),Shared,s,Time gap between repeated confirmation samples while validating a new event.
+PID Control,All runs,P Gain,Shared,x,Proportional steering gain used by the wall-follow PID.
+PID Control,All runs,I Gain,Shared,x,Integral steering gain used to remove steady bias.
+PID Control,All runs,D Gain,Shared,x,Derivative steering gain used to react to fast error changes.
+PID Control,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before PID is applied.
+PID Control,All runs,1Wall Target(cm),Shared,cm,Desired distance from a single visible wall when only one side wall is available.
+PID Control,All runs,Left Scale(x),Shared,x,Extra output scale applied when the correction command goes left.
+PID Control,All runs,Right Scale(x),Shared,x,Extra output scale applied when the correction command goes right.
+Motor Calibration,All runs,PairA Fwd(x),Shared,x,Gain applied to the FL+RR motor pair during forward motion.
+Motor Calibration,All runs,PairA Rev(x),Shared,x,Gain applied to the FL+RR motor pair during reverse motion.
+Motor Calibration,All runs,PairB Fwd(x),Shared,x,Gain applied to the FR+RL motor pair during forward motion.
+Motor Calibration,All runs,PairB Rev(x),Shared,x,Gain applied to the FR+RL motor pair during reverse motion.
+Motor Calibration,All runs,FL Fwd(x),Shared,x,Front-left wheel gain during forward motion.
+Motor Calibration,All runs,FL Rev(x),Shared,x,Front-left wheel gain during reverse motion.
+Motor Calibration,All runs,FR Fwd(x),Shared,x,Front-right wheel gain during forward motion.
+Motor Calibration,All runs,FR Rev(x),Shared,x,Front-right wheel gain during reverse motion.
+Motor Calibration,All runs,RR Fwd(x),Shared,x,Rear-right wheel gain during forward motion.
+Motor Calibration,All runs,RR Rev(x),Shared,x,Rear-right wheel gain during reverse motion.
+Motor Calibration,All runs,RL Fwd(x),Shared,x,Rear-left wheel gain during forward motion.
+Motor Calibration,All runs,RL Rev(x),Shared,x,Rear-left wheel gain during reverse motion.
+IR Test,All runs,IR Stable(s),Shared,s,How long the IR state must stay unchanged before the code accepts it as stable.
+IR Test,All runs,Dead-End(cm),Shared,cm,Front distance at or below which the path can be considered a dead-end zone.
+IR Test,All runs,Finish Detect(cm),Shared,cm,Front distance at or above which the path can qualify as a finish zone.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Heading,Per event,direction,Robot heading used before the selected event test starts.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Front Stop(cm),Per event,cm,Front distance used as the event-local safety stop before wall handling.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Event Wall(cm),Per event,cm,Event-local side-wall threshold used while reacquiring walls during that event handler.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Corridor Wall(cm),Shared,cm,Shared corridor wall threshold surfaced inside event config because it still affects corridor PID before and after the event.
+Event Config,Finish Random,Finish Time(s),Per event,s,Extra straight-run time after finish is detected before the test holds.
+Event Config,T-Junction,T-Dir,Per event,left-right,Branch choice used only when the selected event is a T-junction.
+Event Config,Left Turn Right Turn T-Junction Random,Turn Wait(s),Shared,s,Pause between stopping at the wall and switching to the new heading.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Recheck Time(s),Shared,s,Shared interval between repeated event-confirmation samples.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,IR Stable(s),Shared,s,Shared IR stabilization time used before sensor states are trusted.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Dead-End(cm),Shared,cm,Shared front threshold that marks the dead-end zone during event classification.
+Event Config,Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Turn Detect(cm),Shared,cm,Shared front threshold that still counts as turn or junction geometry.
+Event Config,Finish Random,Finish Detect(cm),Shared,cm,Shared finish-distance threshold used when finish is a possible outcome.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,P Gain,Shared,x,Shared proportional gain surfaced because event handlers keep selecting PID continuously.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,I Gain,Shared,x,Shared integral gain surfaced because event handlers keep selecting PID continuously.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,D Gain,Shared,x,Shared derivative gain surfaced because event handlers keep selecting PID continuously.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Curve b,Shared,x,Shared wall-error shaping exponent used before PID in all wall-aware handlers.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,1Wall Target(cm),Shared,cm,Shared single-wall setpoint used whenever only one reliable wall is available.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Left Scale(x),Shared,x,Shared left-output scale used when the final correction command points left.
+Event Config,Corridor Auto Start Dead-end Left Turn Right Turn T-Junction T-Jct Straight Finish Random,Right Scale(x),Shared,x,Shared right-output scale used when the final correction command points right.
