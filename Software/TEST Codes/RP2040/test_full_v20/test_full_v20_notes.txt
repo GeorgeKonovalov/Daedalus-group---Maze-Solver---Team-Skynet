@@ -1,0 +1,42 @@
+test_full_v20
+
+Base:
+- Created from test_full_v19.ino
+
+Updated INO:
+- test_full_v20.ino
+
+Main change in this version:
+- Added a dedicated corridor-return rule for the final part of non-finish handlers.
+- Corridor return is now confirmed by:
+  - front ultrasonic distance > dead-end threshold
+  - both front IR sensors triggered
+- That corridor-return rule is still rechecked repeatedly with the same T_sensing timing and sample-count confirmation flow.
+
+Applied to handler tails:
+- Real execution:
+  - AcquireWall
+  - SafetyStop recovery
+- Execution-state / digital twin:
+  - AcquireWall
+  - SafetyStop recovery
+- Event tests:
+  - Reverse
+  - AcquireWall
+  - T-Junction Straight tail
+  - SafetyStop recovery
+
+Behavior effect:
+- After a non-finish event is already being handled, the code no longer waits for the full Corridor event tree to become true before returning.
+- Instead, it uses the simpler corridor-return signature you requested.
+- While waiting for that corridor-return confirmation, motion continues with the same straight / wall-aware PID logic that was already active for that phase.
+- Finish remains the exception and still uses its own stop / completion flow.
+
+Important notes:
+- StartSeek still uses the normal corridor confirmation path, because Start is a synthetic begin-only state and not a handler tail.
+- SafetyStop still remains a fail-safe stop state until the new corridor-return signature is confirmed again.
+- Event confirmation count is still fixed at 3 samples; T_sensing remains user-tunable.
+
+Files:
+- test_full_v20.ino
+- test_full_v20_notes.txt

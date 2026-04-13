@@ -1,0 +1,74 @@
+test_full_v19
+
+Base:
+- Created from test_full_v18.ino
+
+Updated INO:
+- test_full_v19.ino
+
+Main execution/event changes in this version:
+- Added a new deterministic event tree driven by:
+  - front-left / front-right / rear-left / rear-right IR states in heading-relative coordinates
+  - front ultrasonic threshold bands:
+    - Stop / front wall threshold
+    - Dead-end threshold
+    - Turn threshold
+  - side wall threshold for finish and PID mode selection
+- New events are only checked while the active execution state is Corridor.
+- New non-corridor events are only accepted after repeated matching rechecks spaced by T_sensing.
+- Added T_sensing to the main Settings menu as Tsn.
+- Start remains a synthetic begin-only state and is never sensor-triggered.
+- Event handlers now keep running until Corridor is confirmed again, instead of switching back based only on one immediate condition.
+- PID mode selection now runs continuously during moving handlers:
+  - two-wall PID
+  - left-wall PID
+  - right-wall PID
+  - no PID
+- Added SafetyStop / Stop as a dedicated event when the front ultrasonic falls below the stop threshold before another event resolved earlier.
+
+Updated execution behavior:
+- StartSeek:
+  - stays in Start
+  - waits for confirmed Corridor using repeated sensing
+- Corridor:
+  - checks for new confirmed events only here
+- Dead-end:
+  - flips heading immediately
+  - continues wall-aware motion until Corridor is confirmed again
+- Left / Right / T-Junction:
+  - confirm event in Corridor
+  - approach using continuous PID selection
+  - stop at stop threshold
+  - wait
+  - change heading
+  - continue until Corridor is confirmed again
+- T-Junction Straight:
+  - handled as its own event
+  - continues with continuous PID selection until Corridor is confirmed again
+- Finish:
+  - confirmed only from Corridor
+  - stops and returns to the normal finish flow
+- SafetyStop:
+  - full stop
+  - stays there until Corridor is confirmed again
+
+Execution-state / digital twin:
+- Updated to use the same corridor-only event confirmation logic and the same deterministic event tree as the main execution.
+
+Event tests:
+- Updated to use the same deterministic event confirmation logic.
+- Event-test motion phases now use continuous wall-aware PID selection instead of hardcoded no-PID straight motion.
+
+Important logic caveats / unsettled cases:
+- The provided pseudocode leaves one branch ambiguous:
+  - front > Turn threshold
+  - both front IR sensors open
+  - finish conditions not satisfied
+  In v19 this is treated as T-Junction Straight instead of Corridor, because an open front with no finish is still a non-corridor opening.
+- SafetyStop is intentionally strict and checked first. If Stop(cm) is too large, it can suppress Dead-end / Turn detection by firing before them.
+- Event confirmation count is fixed in code at 3 matching samples; only T_sensing is user-tunable from the menu.
+- The old stable-snapshot path is still present for sensor infrastructure / compatibility, but the main execution decision path now uses the newer repeated corridor-only confirmation flow.
+
+Files:
+- test_full_v19.ino
+- test_full_v19_notes.txt

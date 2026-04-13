@@ -62,6 +62,7 @@ struct RuntimeSettings {
   int junctionStopDistance_x100 = 200;
   int wallThreshold_x100 = 600;
   int turningThreshold_x100 = 2600;
+  int sensingInterval_x100 = 10;
   int waitBeforeTurn_x100 = 500;
   int irStableTime_x100 = 10;
   int deadEndDistance_x100 = 1600;
@@ -85,6 +86,7 @@ float gPidRightScale = 1.0f;
 float gJunctionStopDistance = 2.0f;
 float gWallThresholdCm = 6.0f;
 float gTurningThresholdCm = 26.0f;
+float gSensingIntervalSeconds = 0.10f;
 float gWaitBeforeTurnSeconds = 5.0f;
 float gIRStableTimeSeconds = 0.10f;
 float gDeadEndDistanceCm = 16.0f;
@@ -151,6 +153,7 @@ enum class EventName : uint8_t {
   Idle,
   Start,
   SensorWait,
+  SafetyStop,
   Corridor,
   TJunction,
   DeadEnd,
@@ -190,7 +193,7 @@ Screen previousScreen = Screen::Root;
 
 int rootIndex = 0;          // 0=Start, 1=Start Settings, 2=Settings, 3=Event Test, 4=Execution State, 5=IR, 6=US
 int startSettingsIndex = 0; // 0=Mode, 1=Wait, 2=Back
-int settingsIndex = 0;      // 0=PID, 1=Motor Tune, 2=Stop Dist, 3=Wall Thr, 4=Turn Thr, 5=Save
+int settingsIndex = 0;      // 0=PID, 1=Motor Tune, 2=Stop Dist, 3=Wall Thr, 4=Turn Thr, 5=T_sense, 6=Save
 int pidIndex = 0;           // 0=P, 1=I, 2=D, 3=b, 4=WallDist, 5=L Corr, 6=R Corr, 7=PID Test, 8=Back
 int motorTuneIndex = 0;
 int eventTestIndex = 0;
@@ -199,7 +202,7 @@ int irSensorIndex = 0;
 
 constexpr int ROOT_COUNT = 7;
 constexpr int START_SETTINGS_COUNT = 3;
-constexpr int SETTINGS_COUNT = 6;
+constexpr int SETTINGS_COUNT = 7;
 constexpr int PID_COUNT = 9;
 constexpr int IR_SENSOR_COUNT = 6;
 
@@ -233,6 +236,19 @@ struct DirectionMagnitude {
   float rawMagnitude = 0.0f;
   float interpretedMagnitude = 0.0f;
   float signedValue = 0.0f;
+};
+
+enum class PidMode : uint8_t {
+  None,
+  LeftWall,
+  RightWall,
+  TwoWall
+};
+
+struct EventConfirmState {
+  EventName candidate = EventName::Idle;
+  uint8_t sampleCount = 0;
+  uint32_t nextSampleMs = 0;
 };
 
 // ======================================================
@@ -299,6 +315,12 @@ uint32_t sensorStableVersion = 0;
 uint32_t mainHandledStableVersion = 0;
 uint32_t eventTestHandledStableVersion = 0;
 uint32_t mazeTestHandledStableVersion = 0;
+EventConfirmState executionEventConfirm;
+EventConfirmState executionCorridorConfirm;
+EventConfirmState eventTestEventConfirm;
+EventConfirmState eventTestCorridorConfirm;
+EventConfirmState mazeTestEventConfirm;
+EventConfirmState mazeTestCorridorConfirm;
 
 // ===== PID =====
 float Kp = 0.07f;
@@ -319,6 +341,7 @@ const float FRONT_STOP_THRESHOLD = 10.0f;
 const float ULTRASONIC_STALE_MS = 1200.0f;
 const float SENSOR_MAX_VALID_CM = 400.0f;
 const float EVENT_CONFIRM_MARGIN_CM = 0.5f;
+constexpr uint8_t EVENT_CONFIRM_SAMPLE_COUNT = 3;
 const uint32_t EXECUTION_ACQUIRE_TIMEOUT_MS = 2500;
 const uint32_t EVENT_TEST_ACQUIRE_TIMEOUT_MS = 2500;
 const uint32_t MAZE_TEST_ACQUIRE_TIMEOUT_MS = 2500;
@@ -342,6 +365,7 @@ enum class ExecutionPhase : uint8_t {
   ApproachWall,
   WaitAtTurn,
   AcquireWall,
+  SafetyStop,
   Finished
 };
 
@@ -416,6 +440,7 @@ enum class MazeTestPhase : uint8_t {
   ApproachWall,
   WaitAtTurn,
   AcquireWall,
+  SafetyStop,
   Finished
 };
 
@@ -467,6 +492,7 @@ float averagedDistanceForHeading(Heading h);
 float corridorRawErrorForHeading(Heading h);
 float corridorInterpretedErrorForHeading(Heading h);
 float rawWallPidErrorForHeading(Heading heading, float wallThresholdCm, bool& pidActive);
+PidMode selectPidModeForHeading(Heading heading, float wallThresholdCm);
 float applyDirectionalCorrectionScale(float correction);
 void resetPIDPreview();
 void updatePIDPreview();
@@ -475,7 +501,8 @@ uint8_t buildIRMask();
 RobotTwinCorners robotTwinCornersForMask(uint8_t irMask, Heading heading);
 SensorSnapshot captureSensorSnapshot();
 SensorObservation buildSensorObservation(const SensorSnapshot& snapshot, Heading heading, float deadEndThresholdCm,
-                                        float turningThresholdCm, float wallThresholdCm, float finishThresholdCm);
+                                        float turningThresholdCm, float frontWallThresholdCm, float wallThresholdCm,
+                                        float finishThresholdCm);
 bool sensorObservationChanged(const SensorObservation& a, const SensorObservation& b);
 bool sensorSnapshotChanged(const SensorSnapshot& a, const SensorSnapshot& b);
 void updateSensorStability();
@@ -486,9 +513,23 @@ bool rearPairTriggeredMask(uint8_t irMask);
 bool allIRTriggeredMask(uint8_t irMask);
 bool allIRClearMask(uint8_t irMask);
 EventName classifySensorEventWithThresholds(const SensorSnapshot& snapshot, Heading heading, bool allowFinishEvent,
-                                            float deadEndThresholdCm, float turningThresholdCm, float wallThresholdCm,
+                                            float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                            float wallThresholdCm,
                                             float finishThresholdCm);
 EventName classifyStableSensorEvent(const SensorSnapshot& snapshot, Heading heading, bool allowFinishEvent);
+void resetEventConfirmState(EventConfirmState& state);
+bool isConfirmedCorridorEventCandidate(EventName eventName);
+bool pollConfirmedSpecificEvent(EventConfirmState& state, EventName expectedEvent, Heading heading, bool allowFinishEvent,
+                                float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                float wallThresholdCm, float finishThresholdCm,
+                                SensorSnapshot& sampledSnapshot);
+bool pollConfirmedCorridorTransition(EventConfirmState& state, Heading heading, bool allowFinishEvent,
+                                     float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                     float wallThresholdCm, float finishThresholdCm,
+                                     EventName& confirmedEvent, SensorSnapshot& sampledSnapshot);
+bool corridorRecoverySignature(const SensorSnapshot& snapshot, Heading heading, float deadEndThresholdCm);
+bool pollConfirmedCorridorRecovery(EventConfirmState& state, Heading heading, float deadEndThresholdCm,
+                                   SensorSnapshot& sampledSnapshot);
 
 void onEncoderAChange();
 void onAnyIRSensorChange();
@@ -760,6 +801,16 @@ float rawWallPidErrorForHeading(Heading heading, float wallThresholdCm, bool& pi
   return 0.0f;
 }
 
+PidMode selectPidModeForHeading(Heading heading, float wallThresholdCm) {
+  bool leftWallPresent = ultrasonicFresh() && leftDistanceForHeading(heading) <= wallThresholdCm;
+  bool rightWallPresent = ultrasonicFresh() && rightDistanceForHeading(heading) <= wallThresholdCm;
+
+  if (leftWallPresent && rightWallPresent) return PidMode::TwoWall;
+  if (leftWallPresent) return PidMode::LeftWall;
+  if (rightWallPresent) return PidMode::RightWall;
+  return PidMode::None;
+}
+
 float applyDirectionalCorrectionScale(float correction) {
   if (correction > 0.0f) {
     return constrain(correction * gPidRightScale, -CORRECTION_LIMIT, CORRECTION_LIMIT);
@@ -911,12 +962,14 @@ SensorSnapshot captureSensorSnapshot() {
 }
 
 SensorObservation buildSensorObservation(const SensorSnapshot& snapshot, Heading heading, float deadEndThresholdCm,
-                                        float turningThresholdCm, float wallThresholdCm, float finishThresholdCm) {
+                                        float turningThresholdCm, float frontWallThresholdCm, float wallThresholdCm,
+                                        float finishThresholdCm) {
   SensorObservation observation;
   observation.irMask = snapshot.irMask;
   observation.ultrasonicValid = snapshot.ultrasonicValid;
   observation.candidateEvent = classifySensorEventWithThresholds(
-    snapshot, heading, true, deadEndThresholdCm, turningThresholdCm, wallThresholdCm, finishThresholdCm);
+    snapshot, heading, true, deadEndThresholdCm, turningThresholdCm, frontWallThresholdCm, wallThresholdCm,
+    finishThresholdCm);
   return observation;
 }
 
@@ -927,8 +980,10 @@ bool sensorObservationChanged(const SensorObservation& a, const SensorObservatio
 }
 
 bool sensorSnapshotChanged(const SensorSnapshot& a, const SensorSnapshot& b) {
-  SensorObservation obsA = buildSensorObservation(a, currentHeading, gDeadEndDistanceCm, gTurningThresholdCm, gWallThresholdCm, gFinishDistanceCm);
-  SensorObservation obsB = buildSensorObservation(b, currentHeading, gDeadEndDistanceCm, gTurningThresholdCm, gWallThresholdCm, gFinishDistanceCm);
+  SensorObservation obsA = buildSensorObservation(a, currentHeading, gDeadEndDistanceCm, gTurningThresholdCm,
+                                                  gJunctionStopDistance, gWallThresholdCm, gFinishDistanceCm);
+  SensorObservation obsB = buildSensorObservation(b, currentHeading, gDeadEndDistanceCm, gTurningThresholdCm,
+                                                  gJunctionStopDistance, gWallThresholdCm, gFinishDistanceCm);
   return sensorObservationChanged(obsA, obsB);
 }
 
@@ -1062,73 +1117,227 @@ RobotTwinCorners robotTwinCornersForMask(uint8_t irMask, Heading heading) {
 }
 
 EventName classifySensorEventWithThresholds(const SensorSnapshot& snapshot, Heading heading, bool allowFinishEvent,
-                                            float deadEndThresholdCm, float turningThresholdCm, float wallThresholdCm,
-                                            float finishThresholdCm) {
+                                            float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                            float wallThresholdCm, float finishThresholdCm) {
   // Start is a synthetic begin-only state and is never returned by sensor classification.
   if (!snapshot.ultrasonicValid) {
     return EventName::SensorWait;
   }
 
-  bool allTriggered = allIRTriggeredMask(snapshot.irMask);
-  bool allClear = allIRClearMask(snapshot.irMask);
   RobotTwinCorners corners = robotTwinCornersForMask(snapshot.irMask, heading);
-  bool frontPairTriggered = corners.frontLeft && corners.frontRight;
-  bool rearPairTriggered = corners.rearLeft && corners.rearRight;
-  bool leftPairTriggered = corners.frontLeft && corners.rearLeft;
-  bool rightPairTriggered = corners.frontRight && corners.rearRight;
-  bool frontChanged = !frontPairTriggered;
-  bool sideChanged = !leftPairTriggered || !rightPairTriggered;
-  bool irChangedFromCorridor = !allTriggered && !allClear;
+  bool frontLeftBlocked = corners.frontLeft;
+  bool frontRightBlocked = corners.frontRight;
+  bool rearLeftBlocked = corners.rearLeft;
+  bool rearRightBlocked = corners.rearRight;
 
   float front = distanceForHeadingInSnapshot(snapshot, heading);
   float left = distanceForHeadingInSnapshot(snapshot, turnLeftOf(heading));
   float right = distanceForHeadingInSnapshot(snapshot, turnRightOf(heading));
-  bool leftOpenStable = distanceOpenEnough(left, wallThresholdCm);
-  bool rightOpenStable = distanceOpenEnough(right, wallThresholdCm);
-  bool leftWallPresent = distanceWithinWallThreshold(left, wallThresholdCm);
-  bool rightWallPresent = distanceWithinWallThreshold(right, wallThresholdCm);
+  bool sideLeftOpen = left >= wallThresholdCm;
+  bool sideRightOpen = right >= wallThresholdCm;
 
-  if (allTriggered) {
-    if (front <= deadEndThresholdCm) return EventName::DeadEnd;
-    if (front < (deadEndThresholdCm + EVENT_CONFIRM_MARGIN_CM)) return EventName::SensorWait;
+  if (front <= frontWallThresholdCm) {
+    return EventName::SafetyStop;
+  }
+
+  if (front <= deadEndThresholdCm) {
+    if (frontRightBlocked) {
+      return frontLeftBlocked ? EventName::DeadEnd : EventName::LeftTurn;
+    }
+    return frontLeftBlocked ? EventName::RightTurn : EventName::TJunction;
+  }
+
+  if (front <= turningThresholdCm) {
+    if (frontRightBlocked) {
+      return frontLeftBlocked ? EventName::Corridor : EventName::LeftTurn;
+    }
+    return frontLeftBlocked ? EventName::RightTurn : EventName::TJunction;
+  }
+
+  if (frontRightBlocked && frontLeftBlocked) {
     return EventName::Corridor;
   }
 
-  if (irChangedFromCorridor &&
-      (frontChanged || sideChanged) &&
-      frontInTurnWindow(front, deadEndThresholdCm, turningThresholdCm)) {
-    if (leftOpenStable && rightOpenStable) return EventName::TJunction;
-    if (leftOpenStable && !rightOpenStable) return EventName::LeftTurn;
-    if (rightOpenStable && !leftOpenStable) return EventName::RightTurn;
-    if (leftOpenStable && rightWallPresent) return EventName::LeftTurn;
-    if (rightOpenStable && leftWallPresent) return EventName::RightTurn;
-    return EventName::SensorWait;
-  }
-
-  if (irChangedFromCorridor &&
-      frontChanged &&
-      frontInStraightWindow(front, turningThresholdCm) &&
-      leftOpenStable &&
-      rightOpenStable) {
-    return EventName::TJunctionStraight;
-  }
-
   if (allowFinishEvent &&
-      allClear &&
-      !frontPairTriggered &&
-      !rearPairTriggered &&
+      !frontLeftBlocked &&
+      !frontRightBlocked &&
+      !rearLeftBlocked &&
+      !rearRightBlocked &&
       finishFrontClearEnough(front, finishThresholdCm) &&
-      leftOpenStable &&
-      rightOpenStable) {
+      sideLeftOpen &&
+      sideRightOpen) {
     return EventName::Finish;
   }
 
-  return EventName::SensorWait;
+  if (!frontLeftBlocked || !frontRightBlocked) {
+    return EventName::TJunctionStraight;
+  }
+
+  return EventName::Corridor;
 }
 
 EventName classifyStableSensorEvent(const SensorSnapshot& snapshot, Heading heading, bool allowFinishEvent) {
   return classifySensorEventWithThresholds(snapshot, heading, allowFinishEvent,
-                                          gDeadEndDistanceCm, gTurningThresholdCm, gWallThresholdCm, gFinishDistanceCm);
+                                          gDeadEndDistanceCm, gTurningThresholdCm, gJunctionStopDistance,
+                                          gWallThresholdCm, gFinishDistanceCm);
+}
+
+void resetEventConfirmState(EventConfirmState& state) {
+  state.candidate = EventName::Idle;
+  state.sampleCount = 0;
+  state.nextSampleMs = 0;
+}
+
+bool isConfirmedCorridorEventCandidate(EventName eventName) {
+  switch (eventName) {
+    case EventName::Corridor:
+    case EventName::Idle:
+    case EventName::Start:
+    case EventName::SensorWait:
+    case EventName::WaitAtTurn:
+    case EventName::ApproachWall:
+    case EventName::RestartReady:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool pollConfirmedSpecificEvent(EventConfirmState& state, EventName expectedEvent, Heading heading, bool allowFinishEvent,
+                                float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                float wallThresholdCm, float finishThresholdCm,
+                                SensorSnapshot& sampledSnapshot) {
+  uint32_t now = millis();
+  sampledSnapshot = captureSensorSnapshot();
+  EventName candidate = classifySensorEventWithThresholds(sampledSnapshot, heading, allowFinishEvent,
+                                                          deadEndThresholdCm, turningThresholdCm, frontWallThresholdCm,
+                                                          wallThresholdCm, finishThresholdCm);
+
+  if (candidate != expectedEvent) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  if (state.candidate != expectedEvent || state.sampleCount == 0) {
+    state.candidate = expectedEvent;
+    state.sampleCount = 1;
+    state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+    return EVENT_CONFIRM_SAMPLE_COUNT <= 1;
+  }
+
+  if (now < state.nextSampleMs) {
+    return false;
+  }
+
+  sampledSnapshot = captureSensorSnapshot();
+  EventName rechecked = classifySensorEventWithThresholds(sampledSnapshot, heading, allowFinishEvent,
+                                                          deadEndThresholdCm, turningThresholdCm, frontWallThresholdCm,
+                                                          wallThresholdCm, finishThresholdCm);
+  if (rechecked != expectedEvent) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  state.sampleCount++;
+  if (state.sampleCount >= EVENT_CONFIRM_SAMPLE_COUNT) {
+    resetEventConfirmState(state);
+    return true;
+  }
+
+  state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+  return false;
+}
+
+bool pollConfirmedCorridorTransition(EventConfirmState& state, Heading heading, bool allowFinishEvent,
+                                     float deadEndThresholdCm, float turningThresholdCm, float frontWallThresholdCm,
+                                     float wallThresholdCm, float finishThresholdCm,
+                                     EventName& confirmedEvent, SensorSnapshot& sampledSnapshot) {
+  uint32_t now = millis();
+  sampledSnapshot = captureSensorSnapshot();
+  EventName candidate = classifySensorEventWithThresholds(sampledSnapshot, heading, allowFinishEvent,
+                                                          deadEndThresholdCm, turningThresholdCm, frontWallThresholdCm,
+                                                          wallThresholdCm, finishThresholdCm);
+
+  if (!isConfirmedCorridorEventCandidate(candidate)) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  if (state.candidate != candidate || state.sampleCount == 0) {
+    state.candidate = candidate;
+    state.sampleCount = 1;
+    state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+    return false;
+  }
+
+  if (now < state.nextSampleMs) {
+    return false;
+  }
+
+  sampledSnapshot = captureSensorSnapshot();
+  EventName rechecked = classifySensorEventWithThresholds(sampledSnapshot, heading, allowFinishEvent,
+                                                          deadEndThresholdCm, turningThresholdCm, frontWallThresholdCm,
+                                                          wallThresholdCm, finishThresholdCm);
+  if (rechecked != candidate) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  state.sampleCount++;
+  if (state.sampleCount >= EVENT_CONFIRM_SAMPLE_COUNT) {
+    confirmedEvent = candidate;
+    resetEventConfirmState(state);
+    return true;
+  }
+
+  state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+  return false;
+}
+
+bool corridorRecoverySignature(const SensorSnapshot& snapshot, Heading heading, float deadEndThresholdCm) {
+  if (!snapshot.ultrasonicValid) return false;
+
+  RobotTwinCorners corners = robotTwinCornersForMask(snapshot.irMask, heading);
+  float front = distanceForHeadingInSnapshot(snapshot, heading);
+
+  return (front > deadEndThresholdCm) && corners.frontLeft && corners.frontRight;
+}
+
+bool pollConfirmedCorridorRecovery(EventConfirmState& state, Heading heading, float deadEndThresholdCm,
+                                   SensorSnapshot& sampledSnapshot) {
+  uint32_t now = millis();
+  sampledSnapshot = captureSensorSnapshot();
+
+  if (!corridorRecoverySignature(sampledSnapshot, heading, deadEndThresholdCm)) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  if (state.candidate != EventName::Corridor || state.sampleCount == 0) {
+    state.candidate = EventName::Corridor;
+    state.sampleCount = 1;
+    state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+    return EVENT_CONFIRM_SAMPLE_COUNT <= 1;
+  }
+
+  if (now < state.nextSampleMs) {
+    return false;
+  }
+
+  sampledSnapshot = captureSensorSnapshot();
+  if (!corridorRecoverySignature(sampledSnapshot, heading, deadEndThresholdCm)) {
+    resetEventConfirmState(state);
+    return false;
+  }
+
+  state.sampleCount++;
+  if (state.sampleCount >= EVENT_CONFIRM_SAMPLE_COUNT) {
+    resetEventConfirmState(state);
+    return true;
+  }
+
+  state.nextSampleMs = now + (uint32_t)(gSensingIntervalSeconds * 1000.0f);
+  return false;
 }
 
 // ======================================================
@@ -1230,6 +1439,7 @@ void commitGlobalsForRuntime() {
   gJunctionStopDistance = activeSettings.junctionStopDistance_x100 / 100.0f;
   gWallThresholdCm = activeSettings.wallThreshold_x100 / 100.0f;
   gTurningThresholdCm = activeSettings.turningThreshold_x100 / 100.0f;
+  gSensingIntervalSeconds = activeSettings.sensingInterval_x100 / 100.0f;
   gWaitBeforeTurnSeconds = activeSettings.waitBeforeTurn_x100 / 100.0f;
   gIRStableTimeSeconds = activeSettings.irStableTime_x100 / 100.0f;
   gDeadEndDistanceCm = activeSettings.deadEndDistance_x100 / 100.0f;
@@ -1296,6 +1506,8 @@ void beginExecutionAttempt() {
   previousError = 0.0f;
   integral = 0.0f;
   previousTime = millis();
+  resetEventConfirmState(executionEventConfirm);
+  resetEventConfirmState(executionCorridorConfirm);
   mainHandledStableVersion = sensorStableVersion;
   suppressButtonUntilRelease = true;
 }
@@ -1507,6 +1719,7 @@ const char* eventNameToString(EventName name) {
     case EventName::Idle:         return "Idle";
     case EventName::Start:        return "Start";
     case EventName::SensorWait:   return "Sensor";
+    case EventName::SafetyStop:   return "Stop";
     case EventName::Corridor:     return "Corridor";
     case EventName::TJunction:    return "T-Jct";
     case EventName::DeadEnd:      return "Dead-end";
@@ -1615,6 +1828,8 @@ void resetEventTestRun() {
   eventTestStartedMs = millis();
   eventTestPendingHeading = currentEventTestHeading();
   currentHeading = currentEventTestHeading();
+  resetEventConfirmState(eventTestEventConfirm);
+  resetEventConfirmState(eventTestCorridorConfirm);
 }
 
 void startEventTestRun() {
@@ -1629,6 +1844,8 @@ void startEventTestRun() {
   integral = 0.0f;
   previousTime = millis();
   eventTestStartedMs = millis();
+  resetEventConfirmState(eventTestEventConfirm);
+  resetEventConfirmState(eventTestCorridorConfirm);
   eventTestHandledStableVersion = sensorStableVersion;
 
   switch (selectedEventTest) {
@@ -1658,6 +1875,8 @@ void resetMazeTest() {
   mazeTestStartedMs = millis();
   mazeTestFrozenDurationMs = 0;
   mazeTestAttempt = 0;
+  resetEventConfirmState(mazeTestEventConfirm);
+  resetEventConfirmState(mazeTestCorridorConfirm);
 }
 
 void startMazeTest() {
@@ -1671,6 +1890,8 @@ void startMazeTest() {
   mazeTestStartedMs = millis();
   mazeTestFrozenDurationMs = 0;
   mazeTestAttempt++;
+  resetEventConfirmState(mazeTestEventConfirm);
+  resetEventConfirmState(mazeTestCorridorConfirm);
   mazeTestHandledStableVersion = sensorStableVersion;
   suppressButtonUntilRelease = true;
 }
@@ -1682,13 +1903,8 @@ void updateMazeTestLogic() {
     }
     return;
   }
-
-  SensorSnapshot stableEventSnapshot = currentStableSensorSnapshot();
-  bool hasStableEvent = confirmedStableSnapshotAvailable();
-  EventName stableDetectedEvent = hasStableEvent
-    ? classifyStableSensorEvent(stableEventSnapshot, mazeTestHeading, true)
-    : EventName::SensorWait;
-  bool freshStableEvent = hasStableEvent && (mazeTestHandledStableVersion != sensorStableVersion);
+  SensorSnapshot sampledSnapshot;
+  EventName confirmedEvent = EventName::Idle;
 
   switch (mazeTestPhase) {
     case MazeTestPhase::Idle:
@@ -1698,84 +1914,83 @@ void updateMazeTestLogic() {
     case MazeTestPhase::StartSeek:
       mazeTestEvent = EventName::Start;
       mazeTestResolvedEvent = EventName::Start;
-      if (stableDetectedEvent == EventName::Corridor) {
-        mazeTestHandledStableVersion = sensorStableVersion;
+      if (pollConfirmedSpecificEvent(mazeTestCorridorConfirm, EventName::Corridor, mazeTestHeading, false,
+                                     gDeadEndDistanceCm, gTurningThresholdCm, gJunctionStopDistance,
+                                     gWallThresholdCm, gFinishDistanceCm, sampledSnapshot)) {
         mazeTestPhase = MazeTestPhase::Corridor;
+        mazeTestEvent = EventName::Corridor;
+        mazeTestResolvedEvent = EventName::Corridor;
+        resetEventConfirmState(mazeTestEventConfirm);
       }
       return;
 
     case MazeTestPhase::Corridor:
       mazeTestEvent = EventName::Corridor;
-      if (freshStableEvent && stableDetectedEvent == EventName::Finish) {
-        mazeTestHandledStableVersion = sensorStableVersion;
-        mazeTestEvent = EventName::Finish;
-        mazeTestPhase = MazeTestPhase::Finished;
-        mazeTestFrozenDurationMs = millis() - mazeTestStartedMs;
-        mazeTestActive = false;
-        return;
-      }
+      if (pollConfirmedCorridorTransition(mazeTestEventConfirm, mazeTestHeading, true,
+                                          gDeadEndDistanceCm, gTurningThresholdCm, gJunctionStopDistance,
+                                          gWallThresholdCm, gFinishDistanceCm, confirmedEvent, sampledSnapshot)) {
+        mazeTestResolvedEvent = confirmedEvent;
+        mazeTestEvent = confirmedEvent;
 
-      if (freshStableEvent && stableDetectedEvent == EventName::DeadEnd) {
-        mazeTestHandledStableVersion = sensorStableVersion;
-        mazeTestEvent = EventName::DeadEnd;
-        mazeTestHeading = oppositeOf(mazeTestHeading);
-        currentHeading = mazeTestHeading;
-        return;
-      }
+        if (confirmedEvent == EventName::Finish) {
+          mazeTestPhase = MazeTestPhase::Finished;
+          mazeTestFrozenDurationMs = millis() - mazeTestStartedMs;
+          mazeTestActive = false;
+          return;
+        }
 
-      if (freshStableEvent &&
-          (stableDetectedEvent == EventName::TJunction ||
-           stableDetectedEvent == EventName::LeftTurn ||
-           stableDetectedEvent == EventName::RightTurn)) {
-        mazeTestHandledStableVersion = sensorStableVersion;
-        mazeTestEvent = stableDetectedEvent;
-        mazeTestResolvedEvent = stableDetectedEvent;
-        if (stableDetectedEvent == EventName::LeftTurn) {
+        if (confirmedEvent == EventName::SafetyStop) {
+          mazeTestPhase = MazeTestPhase::SafetyStop;
+          resetEventConfirmState(mazeTestCorridorConfirm);
+          return;
+        }
+
+        if (confirmedEvent == EventName::DeadEnd) {
+          mazeTestHeading = oppositeOf(mazeTestHeading);
+          currentHeading = mazeTestHeading;
+          mazeTestPendingHeading = mazeTestHeading;
+          mazeTestPhase = MazeTestPhase::AcquireWall;
+          resetEventConfirmState(mazeTestCorridorConfirm);
+          return;
+        }
+
+        if (confirmedEvent == EventName::TJunctionStraight) {
+          mazeTestPendingHeading = mazeTestHeading;
+          mazeTestPhase = MazeTestPhase::AcquireWall;
+          resetEventConfirmState(mazeTestCorridorConfirm);
+          return;
+        }
+
+        if (confirmedEvent == EventName::LeftTurn) {
           mazeTestPendingHeading = turnLeftOf(mazeTestHeading);
-        } else if (stableDetectedEvent == EventName::RightTurn) {
+        } else if (confirmedEvent == EventName::RightTurn) {
           mazeTestPendingHeading = turnRightOf(mazeTestHeading);
         } else {
-          mazeTestPendingHeading = chooseNextHeadingFromSnapshot(stableEventSnapshot, mazeTestHeading);
+          mazeTestPendingHeading = chooseNextHeadingFromSnapshot(sampledSnapshot, mazeTestHeading);
         }
         mazeTestPhase = MazeTestPhase::ApproachWall;
         phaseStartedMs = millis();
-        return;
-      }
-
-      if (freshStableEvent && stableDetectedEvent == EventName::TJunctionStraight) {
-        mazeTestHandledStableVersion = sensorStableVersion;
-        mazeTestEvent = EventName::TJunctionStraight;
-        mazeTestResolvedEvent = EventName::TJunctionStraight;
-        mazeTestPendingHeading = mazeTestHeading;
-        mazeTestPhase = MazeTestPhase::AcquireWall;
-        phaseStartedMs = millis();
       }
       return;
 
-    case MazeTestPhase::ApproachWall: {
+    case MazeTestPhase::ApproachWall:
       mazeTestEvent = mazeTestResolvedEvent;
-      if (!stableEventSnapshot.ultrasonicValid) return;
-
-      float front = distanceForHeadingInSnapshot(stableEventSnapshot, mazeTestHeading);
-
-      if (front > gJunctionStopDistance) return;
-
-      if (mazeTestPendingHeading == mazeTestHeading) {
-        mazeTestEvent = EventName::DeadEnd;
-        mazeTestHeading = oppositeOf(mazeTestHeading);
-        currentHeading = mazeTestHeading;
-        mazeTestPhase = MazeTestPhase::Corridor;
+      if (!ultrasonicFresh()) {
+        mazeTestEvent = EventName::SensorWait;
         return;
       }
 
-      mazeTestEvent = (mazeTestPendingHeading == turnLeftOf(mazeTestHeading))
-        ? EventName::LeftTurn
-        : EventName::RightTurn;
-      mazeTestResolvedEvent = mazeTestEvent;
-      phaseStartedMs = millis();
-      mazeTestPhase = MazeTestPhase::WaitAtTurn;
+      if (frontDistanceForHeading(mazeTestHeading) <= gJunctionStopDistance) {
+        if (mazeTestResolvedEvent == EventName::TJunction) {
+          mazeTestResolvedEvent = (mazeTestPendingHeading == turnLeftOf(mazeTestHeading))
+            ? EventName::LeftTurn
+            : EventName::RightTurn;
+          mazeTestEvent = mazeTestResolvedEvent;
+        }
+        phaseStartedMs = millis();
+        mazeTestPhase = MazeTestPhase::WaitAtTurn;
+      }
       return;
-    }
 
     case MazeTestPhase::WaitAtTurn:
       mazeTestEvent = EventName::WaitAtTurn;
@@ -1784,23 +1999,30 @@ void updateMazeTestLogic() {
         currentHeading = mazeTestHeading;
         phaseStartedMs = millis();
         mazeTestPhase = MazeTestPhase::AcquireWall;
+        resetEventConfirmState(mazeTestCorridorConfirm);
       }
       return;
 
     case MazeTestPhase::AcquireWall:
       mazeTestEvent = mazeTestResolvedEvent;
-      if (ultrasonicFresh() &&
-          (distanceWithinWallThreshold(leftDistanceForHeading(mazeTestHeading), gWallThresholdCm) &&
-           distanceWithinWallThreshold(rightDistanceForHeading(mazeTestHeading), gWallThresholdCm))) {
+      if (pollConfirmedCorridorRecovery(mazeTestCorridorConfirm, mazeTestHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
         mazeTestPhase = MazeTestPhase::Corridor;
-        return;
+        mazeTestEvent = EventName::Corridor;
+        mazeTestResolvedEvent = EventName::Corridor;
+        resetEventConfirmState(mazeTestEventConfirm);
       }
+      return;
 
-      if ((millis() - phaseStartedMs) >= MAZE_TEST_ACQUIRE_TIMEOUT_MS &&
-          ultrasonicFresh() &&
-          (distanceWithinWallThreshold(leftDistanceForHeading(mazeTestHeading), gWallThresholdCm) ||
-           distanceWithinWallThreshold(rightDistanceForHeading(mazeTestHeading), gWallThresholdCm))) {
+    case MazeTestPhase::SafetyStop:
+      mazeTestEvent = EventName::SafetyStop;
+      if (pollConfirmedCorridorRecovery(mazeTestCorridorConfirm, mazeTestHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
         mazeTestPhase = MazeTestPhase::Corridor;
+        mazeTestEvent = EventName::Corridor;
+        mazeTestResolvedEvent = EventName::Corridor;
+        resetEventConfirmState(mazeTestEventConfirm);
+        return;
       }
       return;
 
@@ -1935,6 +2157,9 @@ void handleSettingsInput(int delta, ButtonEvent btn) {
         openDigitEditor("Turn(cm)", &workingSettings.turningThreshold_x100, 0, 9999);
         break;
       case 5:
+        openDigitEditor("Tsn(s)", &workingSettings.sensingInterval_x100, 1, 9999);
+        break;
+      case 6:
         commitGlobalsForRuntime();
         currentScreen = Screen::Root;
         break;
@@ -2306,7 +2531,8 @@ void drawSettingsScreen() {
   items[2] = "Stop: " + formatX100(workingSettings.junctionStopDistance_x100);
   items[3] = "Wall: " + formatX100(workingSettings.wallThreshold_x100);
   items[4] = "Turn: " + formatX100(workingSettings.turningThreshold_x100);
-  items[5] = "Save";
+  items[5] = "Tsn: " + formatX100(workingSettings.sensingInterval_x100);
+  items[6] = "Save";
   drawScrollableItemList(items, SETTINGS_COUNT, settingsIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Long: root");
@@ -2946,7 +3172,8 @@ float calculatePID(float error) {
 // Simple run-mode execution
 // ======================================================
 void followWallAwareHeading(float forwardSpeed, float wallThresholdCm, Heading heading) {
-  bool pidActive = false;
+  PidMode pidMode = selectPidModeForHeading(heading, wallThresholdCm);
+  bool pidActive = pidMode != PidMode::None;
   float rawError = rawWallPidErrorForHeading(heading, wallThresholdCm, pidActive);
   DirectionMagnitude directionalError = buildDirectionalMagnitude(rawError);
 
@@ -2978,18 +3205,10 @@ void runSelectedEventTest() {
   Kp = gP;
   Ki = gI;
   Kd = gD;
-  SensorSnapshot stableEventSnapshot = currentStableSensorSnapshot();
-  bool hasStableEvent = confirmedStableSnapshotAvailable();
   float stopThreshold = currentEventTestStopThreshold();
   float sideThreshold = currentEventTestSideThreshold();
-  EventName stableDetectedEvent = hasStableEvent
-    ? classifySensorEventWithThresholds(stableEventSnapshot, currentHeading, true,
-                                        gDeadEndDistanceCm, gTurningThresholdCm, sideThreshold, gFinishDistanceCm)
-    : EventName::SensorWait;
-
-  auto resolveRandomEvent = [&]() -> EventName {
-    return stableDetectedEvent;
-  };
+  SensorSnapshot sampledSnapshot;
+  EventName confirmedEvent = EventName::Idle;
 
   switch (eventTestPhase) {
     case EventTestPhase::Idle:
@@ -2998,17 +3217,18 @@ void runSelectedEventTest() {
 
     case EventTestPhase::StartSeek:
       currentEventName = EventName::Start;
-      if (hasStableEvent &&
-          classifySensorEventWithThresholds(stableEventSnapshot, currentHeading, false,
-                                            gDeadEndDistanceCm, gTurningThresholdCm, sideThreshold, gFinishDistanceCm) == EventName::Corridor) {
+      if (pollConfirmedSpecificEvent(eventTestCorridorConfirm, EventName::Corridor, currentHeading, false,
+                                     gDeadEndDistanceCm, gTurningThresholdCm, stopThreshold,
+                                     sideThreshold, gFinishDistanceCm, sampledSnapshot)) {
         eventTestPhase = EventTestPhase::Detect;
         eventTestStartedMs = millis();
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        resetEventConfirmState(eventTestEventConfirm);
         return;
       }
-      driveHeading(APPROACH_SPEED, 0.0f);
+      followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
       return;
 
     case EventTestPhase::Detect: {
@@ -3019,96 +3239,66 @@ void runSelectedEventTest() {
         return;
       }
 
-      if (!hasStableEvent) {
+      if (!pollConfirmedCorridorTransition(eventTestEventConfirm, currentHeading, true,
+                                           gDeadEndDistanceCm, gTurningThresholdCm, stopThreshold,
+                                           sideThreshold, gFinishDistanceCm, confirmedEvent, sampledSnapshot)) {
         currentEventName = EventName::Corridor;
         followCorridor();
         return;
       }
 
-      if (selectedEventTest == EventTestCase::Finish) {
-        currentEventName = EventName::Corridor;
-        if (stableDetectedEvent == EventName::Finish) {
-          eventTestPhase = EventTestPhase::FinishStraight;
-          eventTestStartedMs = millis();
-          currentEventName = EventName::Finish;
-          return;
-        }
-        followCorridor();
-        return;
-      }
-
-      if (stableDetectedEvent == EventName::SensorWait ||
-          stableDetectedEvent == EventName::Corridor) {
+      if (selectedEventTest != EventTestCase::Random &&
+          confirmedEvent != eventTestCaseToSensorEvent(selectedEventTest)) {
         currentEventName = EventName::Corridor;
         followCorridor();
         return;
       }
 
-      if (selectedEventTest == EventTestCase::DeadEnd) {
-        if (stableDetectedEvent != EventName::DeadEnd) {
-          currentEventName = EventName::Corridor;
-          followCorridor();
-          return;
-        }
-        currentEventName = EventName::DeadEnd;
-        currentHeading = oppositeOf(currentHeading);
-        previousError = 0.0f;
-        integral = 0.0f;
-        previousTime = millis();
-        eventTestPhase = EventTestPhase::Reverse;
-        return;
-      }
-
-      if (selectedEventTest == EventTestCase::TJunctionStraight) {
-        if (stableDetectedEvent != EventName::TJunctionStraight) {
-          currentEventName = EventName::Corridor;
-          followCorridor();
-          return;
-        }
-        currentEventName = EventName::TJunctionStraight;
-        eventTestPhase = EventTestPhase::StraightToSideThreshold;
-        eventTestStartedMs = millis();
-        return;
-      }
-
-      if (selectedEventTest == EventTestCase::Random) {
-        eventTestResolvedEvent = resolveRandomEvent();
-        if (eventTestResolvedEvent == EventName::SensorWait ||
-            eventTestResolvedEvent == EventName::Corridor) {
-          currentEventName = EventName::Corridor;
-          followCorridor();
-          return;
-        }
-      } else {
-        if (stableDetectedEvent != eventTestCaseToSensorEvent(selectedEventTest)) {
-          currentEventName = EventName::Corridor;
-          followCorridor();
-          return;
-        }
-        eventTestResolvedEvent = stableDetectedEvent;
-      }
+      eventTestResolvedEvent = confirmedEvent;
+      currentEventName = eventTestResolvedEvent;
+      eventTestStartedMs = millis();
+      resetEventConfirmState(eventTestCorridorConfirm);
 
       if (eventTestResolvedEvent == EventName::DeadEnd) {
         currentHeading = oppositeOf(currentHeading);
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        eventTestPendingHeading = currentHeading;
         eventTestPhase = EventTestPhase::Reverse;
+      } else if (eventTestResolvedEvent == EventName::SafetyStop) {
+        eventTestPhase = EventTestPhase::Hold;
       } else if (eventTestResolvedEvent == EventName::Finish) {
         eventTestPhase = EventTestPhase::FinishStraight;
       } else if (eventTestResolvedEvent == EventName::TJunctionStraight) {
+        eventTestPendingHeading = currentHeading;
         eventTestPhase = EventTestPhase::StraightToSideThreshold;
       } else {
+        if (eventTestResolvedEvent == EventName::LeftTurn) {
+          eventTestPendingHeading = turnLeftOf(currentHeading);
+        } else if (eventTestResolvedEvent == EventName::RightTurn) {
+          eventTestPendingHeading = turnRightOf(currentHeading);
+        } else {
+          eventTestPendingHeading = chooseNextHeadingFromSnapshot(sampledSnapshot, currentHeading);
+        }
         eventTestPhase = EventTestPhase::ApproachWall;
       }
-      eventTestStartedMs = millis();
-      currentEventName = eventTestResolvedEvent;
       return;
     }
 
     case EventTestPhase::Reverse:
       currentEventName = EventName::DeadEnd;
-      followCorridor();
+      if (pollConfirmedCorridorRecovery(eventTestCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
+        eventTestPhase = EventTestPhase::Detect;
+        eventTestStartedMs = millis();
+        previousError = 0.0f;
+        integral = 0.0f;
+        previousTime = millis();
+        resetEventConfirmState(eventTestEventConfirm);
+        return;
+      }
+      followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
       return;
 
     case EventTestPhase::ApproachWall:
@@ -3116,16 +3306,19 @@ void runSelectedEventTest() {
         ? EventName::Corridor
         : eventTestResolvedEvent;
       if (ultrasonicFresh() && frontDistance() <= stopThreshold) {
-        eventTestPendingHeading = (eventTestResolvedEvent == EventName::TJunction)
-          ? currentEventTestConfiguredTurn()
-          : (eventTestResolvedEvent == EventName::LeftTurn ? turnLeftOf(currentHeading)
-             : turnRightOf(currentHeading));
+        if (eventTestResolvedEvent == EventName::TJunction) {
+          eventTestPendingHeading = currentEventTestConfiguredTurn();
+          eventTestResolvedEvent = (eventTestPendingHeading == turnLeftOf(currentHeading))
+            ? EventName::LeftTurn
+            : EventName::RightTurn;
+          currentEventName = eventTestResolvedEvent;
+        }
         eventTestPhase = EventTestPhase::WaitBeforeTurn;
         eventTestStartedMs = millis();
         stopAll();
         return;
       }
-      driveHeading(APPROACH_SPEED, 0.0f);
+      followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
       return;
 
     case EventTestPhase::WaitBeforeTurn:
@@ -3137,22 +3330,21 @@ void runSelectedEventTest() {
         previousTime = millis();
         eventTestStartedMs = millis();
         eventTestPhase = EventTestPhase::AcquireWall;
+        resetEventConfirmState(eventTestCorridorConfirm);
       }
       stopAll();
       return;
 
     case EventTestPhase::AcquireWall:
-      currentEventName = (eventTestResolvedEvent == EventName::TJunction)
-        ? ((currentEventTestConfig().turnChoice == TurnChoice::Left) ? EventName::LeftTurn : EventName::RightTurn)
-        : eventTestResolvedEvent;
-      if (bothWallsWithin(sideThreshold) ||
-          (((millis() - eventTestStartedMs) >= EVENT_TEST_ACQUIRE_TIMEOUT_MS) &&
-           (hasLeftWallWithin(sideThreshold) || hasRightWallWithin(sideThreshold)))) {
+      currentEventName = eventTestResolvedEvent;
+      if (pollConfirmedCorridorRecovery(eventTestCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
         eventTestPhase = EventTestPhase::Detect;
         eventTestStartedMs = millis();
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        resetEventConfirmState(eventTestEventConfirm);
         return;
       }
       followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
@@ -3165,19 +3357,19 @@ void runSelectedEventTest() {
         stopAll();
         return;
       }
-      driveHeading(APPROACH_SPEED, 0.0f);
+      followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
       return;
 
     case EventTestPhase::StraightToSideThreshold:
       currentEventName = EventName::TJunctionStraight;
-      if (bothWallsWithin(sideThreshold) ||
-          (((millis() - eventTestStartedMs) >= EVENT_TEST_ACQUIRE_TIMEOUT_MS) &&
-           (hasLeftWallWithin(sideThreshold) || hasRightWallWithin(sideThreshold)))) {
+      if (pollConfirmedCorridorRecovery(eventTestCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
         eventTestPhase = EventTestPhase::Detect;
         eventTestStartedMs = millis();
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        resetEventConfirmState(eventTestEventConfirm);
         return;
       }
       followWallAwareHeading(APPROACH_SPEED, sideThreshold, currentHeading);
@@ -3186,6 +3378,15 @@ void runSelectedEventTest() {
     case EventTestPhase::Hold:
     default:
       currentEventName = (selectedEventTest == EventTestCase::Finish) ? EventName::Finish : eventTestResolvedEvent;
+      if (eventTestResolvedEvent == EventName::SafetyStop &&
+          pollConfirmedCorridorRecovery(eventTestCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
+        eventTestPhase = EventTestPhase::Detect;
+        eventTestStartedMs = millis();
+        resetEventConfirmState(eventTestEventConfirm);
+        currentEventName = EventName::Corridor;
+        return;
+      }
       stopAll();
       return;
   }
@@ -3197,25 +3398,25 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
   Kp = gP;
   Ki = gI;
   Kd = gD;
-  SensorSnapshot stableEventSnapshot = currentStableSensorSnapshot();
-  bool hasStableEvent = confirmedStableSnapshotAvailable();
-  EventName stableDetectedEvent = currentStableSensorEvent(currentHeading, true);
-  bool freshStableEvent = hasStableEvent && (mainHandledStableVersion != sensorStableVersion);
-  float front = frontDistance();
+  SensorSnapshot sampledSnapshot;
+  EventName confirmedEvent = EventName::Idle;
 
   switch (executionPhase) {
     case ExecutionPhase::StartSeek:
       displayedEvent = EventName::Start;
       executionResolvedEvent = EventName::Start;
-      if (stableDetectedEvent == EventName::Corridor) {
-        mainHandledStableVersion = sensorStableVersion;
+      if (pollConfirmedSpecificEvent(executionCorridorConfirm, EventName::Corridor, currentHeading, false,
+                                     gDeadEndDistanceCm, gTurningThresholdCm, gJunctionStopDistance,
+                                     gWallThresholdCm, gFinishDistanceCm, sampledSnapshot)) {
         executionPhase = ExecutionPhase::Corridor;
+        executionResolvedEvent = EventName::Corridor;
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        resetEventConfirmState(executionEventConfirm);
         return;
       }
-      driveHeading(APPROACH_SPEED, 0.0f);
+      followWallAwareHeading(APPROACH_SPEED, gWallThresholdCm, currentHeading);
       return;
 
     case ExecutionPhase::Corridor:
@@ -3225,52 +3426,54 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
         return;
       }
 
-      if (freshStableEvent && stableDetectedEvent == EventName::Finish) {
-        mainHandledStableVersion = sensorStableVersion;
-        displayedEvent = EventName::Finish;
-        stopNow = true;
-        return;
-      }
+      if (pollConfirmedCorridorTransition(executionEventConfirm, currentHeading, true,
+                                          gDeadEndDistanceCm, gTurningThresholdCm, gJunctionStopDistance,
+                                          gWallThresholdCm, gFinishDistanceCm, confirmedEvent, sampledSnapshot)) {
+        executionResolvedEvent = confirmedEvent;
+        displayedEvent = confirmedEvent;
 
-      if (freshStableEvent && stableDetectedEvent == EventName::DeadEnd) {
-        mainHandledStableVersion = sensorStableVersion;
-        currentHeading = oppositeOf(currentHeading);
-        previousError = 0.0f;
-        integral = 0.0f;
-        previousTime = millis();
-        displayedEvent = EventName::DeadEnd;
-        followCorridor();
-        return;
-      }
+        if (confirmedEvent == EventName::Finish) {
+          stopNow = true;
+          return;
+        }
 
-      if (freshStableEvent &&
-          (stableDetectedEvent == EventName::TJunction ||
-           stableDetectedEvent == EventName::LeftTurn ||
-           stableDetectedEvent == EventName::RightTurn)) {
-        mainHandledStableVersion = sensorStableVersion;
-        executionResolvedEvent = stableDetectedEvent;
-        if (stableDetectedEvent == EventName::LeftTurn) {
+        if (confirmedEvent == EventName::SafetyStop) {
+          executionPhase = ExecutionPhase::SafetyStop;
+          phaseStartedMs = millis();
+          resetEventConfirmState(executionCorridorConfirm);
+          stopAll();
+          return;
+        }
+
+        if (confirmedEvent == EventName::DeadEnd) {
+          currentHeading = oppositeOf(currentHeading);
+          pendingHeading = currentHeading;
+          previousError = 0.0f;
+          integral = 0.0f;
+          previousTime = millis();
+          executionPhase = ExecutionPhase::AcquireWall;
+          phaseStartedMs = millis();
+          resetEventConfirmState(executionCorridorConfirm);
+          return;
+        }
+
+        if (confirmedEvent == EventName::TJunctionStraight) {
+          pendingHeading = currentHeading;
+          executionPhase = ExecutionPhase::AcquireWall;
+          phaseStartedMs = millis();
+          resetEventConfirmState(executionCorridorConfirm);
+          return;
+        }
+
+        if (confirmedEvent == EventName::LeftTurn) {
           pendingHeading = turnLeftOf(currentHeading);
-        } else if (stableDetectedEvent == EventName::RightTurn) {
+        } else if (confirmedEvent == EventName::RightTurn) {
           pendingHeading = turnRightOf(currentHeading);
         } else {
-          pendingHeading = chooseNextHeadingFromSnapshot(stableEventSnapshot, currentHeading);
+          pendingHeading = chooseNextHeadingFromSnapshot(sampledSnapshot, currentHeading);
         }
         executionPhase = ExecutionPhase::ApproachWall;
         phaseStartedMs = millis();
-        displayedEvent = stableDetectedEvent;
-        driveHeading(APPROACH_SPEED, 0.0f);
-        return;
-      }
-
-      if (freshStableEvent && stableDetectedEvent == EventName::TJunctionStraight) {
-        mainHandledStableVersion = sensorStableVersion;
-        executionResolvedEvent = EventName::TJunctionStraight;
-        executionPhase = ExecutionPhase::AcquireWall;
-        pendingHeading = currentHeading;
-        phaseStartedMs = millis();
-        displayedEvent = EventName::TJunctionStraight;
-        followWallAwareHeading(APPROACH_SPEED, gWallThresholdCm, currentHeading);
         return;
       }
 
@@ -3287,17 +3490,13 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
 
       displayedEvent = executionResolvedEvent;
 
-      if (front <= gJunctionStopDistance) {
-        if (pendingHeading == currentHeading) {
-          displayedEvent = EventName::DeadEnd;
-          currentHeading = oppositeOf(currentHeading);
-          previousError = 0.0f;
-          integral = 0.0f;
-          previousTime = millis();
-          executionPhase = ExecutionPhase::Corridor;
-          return;
+      if (frontDistance() <= gJunctionStopDistance) {
+        if (executionResolvedEvent == EventName::TJunction) {
+          executionResolvedEvent = (pendingHeading == turnLeftOf(currentHeading))
+            ? EventName::LeftTurn
+            : EventName::RightTurn;
+          displayedEvent = executionResolvedEvent;
         }
-
         executionPhase = ExecutionPhase::WaitAtTurn;
         phaseStartedMs = millis();
         stopAll();
@@ -3305,7 +3504,7 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
         return;
       }
 
-      driveHeading(APPROACH_SPEED, 0.0f);
+      followWallAwareHeading(APPROACH_SPEED, gWallThresholdCm, currentHeading);
       return;
 
     case ExecutionPhase::WaitAtTurn:
@@ -3319,6 +3518,7 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
+        resetEventConfirmState(executionCorridorConfirm);
       }
       return;
 
@@ -3331,18 +3531,31 @@ void updateExecutionLogic(bool& stopNow, EventName& displayedEvent) {
 
       displayedEvent = executionResolvedEvent;
 
-      if (bothWallsWithin(gWallThresholdCm) ||
-          (((millis() - phaseStartedMs) >= EXECUTION_ACQUIRE_TIMEOUT_MS) &&
-           (hasLeftWallWithin(gWallThresholdCm) || hasRightWallWithin(gWallThresholdCm)))) {
+      if (pollConfirmedCorridorRecovery(executionCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
         executionPhase = ExecutionPhase::Corridor;
+        executionResolvedEvent = EventName::Corridor;
         previousError = 0.0f;
         integral = 0.0f;
         previousTime = millis();
         displayedEvent = EventName::Corridor;
+        resetEventConfirmState(executionEventConfirm);
         return;
       }
 
       followWallAwareHeading(APPROACH_SPEED, gWallThresholdCm, currentHeading);
+      return;
+
+    case ExecutionPhase::SafetyStop:
+      displayedEvent = EventName::SafetyStop;
+      stopAll();
+      if (pollConfirmedCorridorRecovery(executionCorridorConfirm, currentHeading, gDeadEndDistanceCm,
+                                        sampledSnapshot)) {
+        executionPhase = ExecutionPhase::Corridor;
+        executionResolvedEvent = EventName::Corridor;
+        displayedEvent = EventName::Corridor;
+        resetEventConfirmState(executionEventConfirm);
+      }
       return;
 
     case ExecutionPhase::Finished:
@@ -3417,6 +3630,7 @@ void setup() {
   activeSettings.junctionStopDistance_x100 = 200;
   activeSettings.wallThreshold_x100 = 600;
   activeSettings.turningThreshold_x100 = 2600;
+  activeSettings.sensingInterval_x100 = 10;
   activeSettings.waitBeforeTurn_x100 = 500;
   activeSettings.irStableTime_x100 = 10;
   activeSettings.deadEndDistance_x100 = 1600;
