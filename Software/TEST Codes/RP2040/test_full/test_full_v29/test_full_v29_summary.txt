@@ -1,0 +1,107 @@
+test_full_v27 summary
+=====================
+
+Base
+----
+- Created as a new version from test_full_v26.ino
+- Keeps the renewed event logic from v26, but restores the menu graphics/layout style from v23
+
+Updated files
+-------------
+- test_full_v27.ino
+- test_full_v27_summary.txt
+- test_full_v27_settings_layout.csv
+
+New IMU work in this version
+----------------------------
+- Added support for the built-in Nano RP2040 Connect IMU via `Arduino_LSM6DSOX`
+- Added tolerance-aware yaw-hold compensation using the onboard LSM6DSOX gyroscope
+- Yaw hold is relative to the saved start frame; the board has no magnetometer, so this is not an absolute compass heading
+- Added `IMU Test` to the root menu for raw `ax ay az gx gy gz` visibility
+- Added `Yaw Test` to the root menu for a yaw-only validation view
+- Added `IMU PID Test` to the PID menu with:
+  - live reference-vs-current x-axis vectors
+  - propagated deadband based on official sensor tolerances
+  - live rotational compensation preview
+  - short-press capture of the current body frame as the new initial coordinates
+- Added editable `IMU P`, `IMU I`, `IMU D`, and `IMU threshold` settings in the PID menu
+- Renewed the X-drive mixer to combine translation and rotational compensation without renormalizing away the commanded left/right direction
+
+LSM6DSOX tolerance model used
+-----------------------------
+- Gyroscope zero-rate level: `+-1.0 dps`
+- Gyroscope RMS noise: `0.075 dps`
+- Gyroscope sensitivity tolerance: `+-1%`
+- Accelerometer zero-g level offset: `+-20 mg`
+- Accelerometer RMS noise: `1.8 mg`
+
+These values are used to build the IMU deadband as:
+- reference uncertainty from the capture window
+- planar accelerometer uncertainty from the saved initial coordinates
+- live measurement uncertainty from current yaw error and gyro rate tolerance
+- user-tunable extra angular threshold on top
+
+Architecture example
+--------------------
+1. `refreshSensors()` updates IR, ultrasonic and IMU state each loop.
+2. `beginExecution()` or `startEventTestRun()` calls `captureImuReference()` to save:
+   - the current body x-axis vector in the robot plane
+   - the averaged initial `ax, ay, az`
+   - the propagated angular tolerance of that saved frame
+3. `followSmart()` computes:
+   - wall PID lateral correction
+   - IMU rotational correction from the signed angle between `x_initialised` and the live x-axis vector
+4. `driveRobotFrame(lateral, forward, rotation, heading)` sends those commands into the 45 degree X-drive mixer:
+   - `u+ = vy + vx` for the FL/RR diagonal
+   - `u- = vy - vx` for the FR/RL diagonal
+   - `spin = [+w, -w, -w, +w]` for yaw compensation
+5. `w` is clamped only to the remaining wheel headroom, so pure left/right translation keeps its original translational pattern mathematically instead of being distorted by post-mix normalization.
+
+Yaw-only test workflow
+----------------------
+1. Open `Yaw Test` from the root menu.
+2. Keep the robot still and short-press once to save the current heading as zero.
+3. Rotate the robot around the vertical axis.
+4. Read the displayed relative yaw angle in degrees.
+
+The shown yaw is relative to the saved reference heading, so it is the right test for checking rotational compensation behavior.
+
+Main UI change in this version
+------------------------------
+- Restored the v23 menu graphics and layout style:
+  - v23-style header font and underline placement
+  - v23-style selected row highlight box
+  - 4-row scrolling window instead of the newer 5-row view
+  - v23-style footer/help text on menu screens
+  - root screen title back to `Main Menu`
+  - menu spacing and row stepping aligned to the older look
+
+Build safety in this version
+----------------------------
+- `test_full_v26.ino` inside the `v27` folder was wrapped with `#if 0 ... #endif` so Arduino only builds `test_full_v27.ino`
+- the already-disabled copied `test_full_v25.ino` remains ignored too
+
+Behavior carried forward
+------------------------
+- Shared event verification settings:
+  - Check gap [s]
+  - Match N [count]
+- Corridor-only event confirmation
+- Continuous PID source selection while moving
+- Cyclic heading/sensor remapping using N/E/S/W index rotation
+- Restored menu structure with:
+  - Root
+  - Start Settings
+  - Settings
+  - PID
+  - PID Test
+  - Motor Tune
+  - Event Test
+- Execution State
+- IR Test
+- Ultrasonic Test
+
+Verification status
+-------------------
+- Source-level fix only
+- arduino-cli is not installed in this workspace, so no board compile was run here
