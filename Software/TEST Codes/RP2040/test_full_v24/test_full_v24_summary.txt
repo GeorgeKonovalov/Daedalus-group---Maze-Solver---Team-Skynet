@@ -1,0 +1,87 @@
+test_full_v24 summary
+=====================
+
+Goal
+----
+Fresh architecture-first rewrite based on the previous solver behavior, but written as a new codebase rather than extending an older monolithic version.
+
+Main architectural changes
+--------------------------
+1. Layered runtime structure:
+   - sensing
+   - perception
+   - planner
+   - executive state machine
+   - motion control
+   - UI
+
+2. Non-blocking main loop:
+   - no setup-time menu loop
+   - sensors are refreshed continuously
+   - execution and UI are separated cleanly
+
+3. Corridor-only event confirmation:
+   - new events are only accepted while the robot is in Corridor state
+   - events are rechecked multiple times with interval T_sensing
+   - handlers run until corridor is confirmed again
+
+4. Continuous PID source selection:
+   - 2-wall PID
+   - 1-wall PID left
+   - 1-wall PID right
+   - no PID if no reliable wall exists
+   This selection stays active in corridor and recovery phases.
+
+5. Simplified robust execution states:
+   - StartSeek
+   - Corridor
+   - ApproachWall
+   - WaitTurn
+   - AcquireCorridor
+   - SafetyStop
+   - Finished
+
+6. Cleaner UI surface:
+   - Root menu
+   - Start Settings
+   - Motion Settings
+   - Detection Settings
+   - Sensor Monitor
+   - Digital Twin
+   - Start Confirmation
+   - Run Screen
+   - Digit Editor with parameter description lines
+
+Behavior implemented
+--------------------
+- Start is synthetic only and handled at run beginning.
+- Dead-end, left turn, right turn, T-junction, T-junction straight, finish, corridor, sensor-wait, and safety-stop are determined from the new perception layer.
+- Finish returns to confirmation/start screen.
+- Sequence mode keeps Right -> Left -> Selection cycle behavior.
+- Digital twin is preserved as a monitoring screen, not a separate execution engine.
+
+Robustness choices
+------------------
+- fixed-size UART buffer instead of String accumulation
+- rolling ultrasonic average
+- stale ultrasonic timeout
+- stable IR mask with timing filter
+- repeated event confirmation
+- dedicated corridor-return confirmation
+- button ignored while execution is running
+- one shared executive instead of separate runtime logic copies
+
+Intentional scope change
+------------------------
+This version focuses on the core architecture and robust runtime path.
+It does not try to carry forward every older experimental screen or duplicated event-test path from previous versions.
+
+Files
+-----
+- test_full_v24.ino
+- test_full_v24_summary.txt
+
+Verification status
+-------------------
+Source-level sanity pass only.
+arduino-cli is not installed in this workspace, so no real board compile was performed here.
