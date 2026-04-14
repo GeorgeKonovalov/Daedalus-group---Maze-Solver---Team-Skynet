@@ -2,12 +2,9 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <Servo.h>
+// The user confirmed the Nano RP2040 Connect IMU library is installed,
+// so we keep the include unconditional and handle availability at runtime.
 #include <Arduino_LSM6DSOX.h>
-#if __has_include(<Arduino_LSM6DSOX.h>)
-#define HAS_NANO_RP2040_IMU 1
-#else
-#define HAS_NANO_RP2040_IMU 0
-#endif
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -77,6 +74,8 @@ struct RuntimeSettings {
   int p_x100 = 7;
   int i_x100 = 0;
   int d_x100 = 0;
+  // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
+  uint8_t imuEnabled = 1;
   int imuP_x100 = 6;
   int imuI_x100 = 0;
   int imuD_x100 = 0;
@@ -108,6 +107,7 @@ struct RuntimeConfig {
   float p = 0.0f;
   float i = 0.0f;
   float d = 0.0f;
+  bool imuEnabled = true;
   float imuP = 0.0f;
   float imuI = 0.0f;
   float imuD = 0.0f;
@@ -482,6 +482,9 @@ void onAnyIrChange();
 void commitRuntimeConfig();
 void resetPid();
 void resetImuPid();
+bool imuHardwareReady();
+bool imuUsageEnabled();
+void clearImuReference();
 
 float fixedToFloat(int value);
 int clampInt(int value, int minValue, int maxValue);
@@ -701,6 +704,7 @@ void commitRuntimeConfig() {
   gCfg.p = fixedToFloat(activeSettings.p_x100);
   gCfg.i = fixedToFloat(activeSettings.i_x100);
   gCfg.d = fixedToFloat(activeSettings.d_x100);
+  gCfg.imuEnabled = (activeSettings.imuEnabled != 0);
   gCfg.imuP = fixedToFloat(activeSettings.imuP_x100);
   gCfg.imuI = fixedToFloat(activeSettings.imuI_x100);
   gCfg.imuD = fixedToFloat(activeSettings.imuD_x100);
@@ -723,6 +727,12 @@ void commitRuntimeConfig() {
   gCfg.eventConfirmCount = (uint8_t)clampInt(activeSettings.eventConfirmCount, 1, 9);
   gCfg.irStableTimeS = clampFloat(fixedToFloat(activeSettings.irStableTime_x100), 0.01f, 10.0f);
   gCfg.waitBeforeTurnS = clampFloat(fixedToFloat(activeSettings.waitBeforeTurn_x100), 0.0f, 30.0f);
+
+  // Turning IMU usage off must immediately remove its influence everywhere.
+  if (!gCfg.imuEnabled) {
+    clearImuReference();
+    resetImuPid();
+  }
 }
 
 void resetPid() {
@@ -735,6 +745,23 @@ void resetImuPid() {
   gImuPid.previousError = 0.0f;
   gImuPid.integral = 0.0f;
   gImuPid.previousMs = millis();
+  gImu.lastCompensationCmd = 0.0f;
+}
+
+bool imuHardwareReady() {
+  return gImu.available;
+}
+
+bool imuUsageEnabled() {
+  return gCfg.imuEnabled && imuHardwareReady();
+}
+
+void clearImuReference() {
+  gImu.reference.valid = false;
+  gImu.referenceValid = false;
+  gImu.yawErrorDeg = 0.0f;
+  gImu.measurementAngleTolDeg = 0.0f;
+  gImu.combinedDeadbandDeg = 0.0f;
   gImu.lastCompensationCmd = 0.0f;
 }
 
@@ -1199,21 +1226,17 @@ static void updateStableIrMask() {
 }
 
 void initImu() {
-#if HAS_NANO_RP2040_IMU
+  // Hardware probing is runtime-only now. Menu toggle decides whether
+  // the IMU is used, but we still try to initialize the onboard device once.
   gImu.available = IMU.begin();
   if (!gImu.available) {
     Serial.println("IMU init failed. LSM6DSOX yaw hold disabled.");
     return;
   }
-  Serial.println("IMU ready. LSM6DSOX yaw hold enabled.");
-#else
-  gImu.available = false;
-  Serial.println("Arduino_LSM6DSOX library missing. IMU yaw hold disabled.");
-#endif
+  Serial.println("IMU ready. LSM6DSOX runtime control enabled.");
 }
 
 static bool sampleImuBlocking(float& ax, float& ay, float& az, float& gx, float& gy, float& gz) {
-#if HAS_NANO_RP2040_IMU
   uint32_t startMs = millis();
   while ((millis() - startMs) < 250) {
     if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
@@ -1223,7 +1246,6 @@ static bool sampleImuBlocking(float& ax, float& ay, float& az, float& gx, float&
     }
     delay(2);
   }
-#endif
   ax = ay = 0.0f;
   az = 1.0f;
   gx = gy = gz = 0.0f;
@@ -1250,9 +1272,16 @@ void updateImuDerivedState() {
 }
 
 void updateImu() {
-  if (!gImu.available) return;
+  if (!imuHardwareReady()) return;
 
-#if HAS_NANO_RP2040_IMU
+  // When IMU usage is switched off from the menu, we stop updating
+  // the control state so no event handler or drive path can use it.
+  if (!gCfg.imuEnabled) {
+    gImu.yawRateDps = 0.0f;
+    gImu.lastCompensationCmd = 0.0f;
+    return;
+  }
+
   if (IMU.accelerationAvailable()) {
     IMU.readAcceleration(gImu.ax, gImu.ay, gImu.az);
   }
@@ -1274,13 +1303,12 @@ void updateImu() {
     gImu.yawRateDps = yawRateDps;
     gImu.yawDeg = wrapAngleDeg(gImu.yawDeg + yawRateDps * dt);
   }
-#endif
 
   updateImuDerivedState();
 }
 
 bool captureImuReference() {
-  if (!gImu.available) return false;
+  if (!imuUsageEnabled()) return false;
 
   float sumAx = 0.0f;
   float sumAy = 0.0f;
@@ -1658,7 +1686,7 @@ float computePid(float error) {
 float applyImuCompensation(ImuPidRuntime& runtime) {
   updateImuDerivedState();
 
-  if (!gImu.available || !gImu.referenceValid) {
+  if (!imuUsageEnabled() || !gImu.referenceValid) {
     runtime.previousError = 0.0f;
     runtime.integral = 0.0f;
     runtime.previousMs = millis();
@@ -1838,10 +1866,10 @@ void beginExecution() {
   resetPlannerCycleIfNeeded();
   gPlanner.attemptCounter++;
 
-  if (gImu.available) {
+  if (imuUsageEnabled()) {
     (void)captureImuReference();
   } else {
-    gImu.referenceValid = false;
+    clearImuReference();
   }
 
   gExecutive.running = true;
@@ -2127,10 +2155,10 @@ static void startEventPhase(NavState state, EventType displayEvent) {
 }
 
 void startEventTestRun() {
-  if (gImu.available) {
+  if (imuUsageEnabled()) {
     (void)captureImuReference();
   } else {
-    gImu.referenceValid = false;
+    clearImuReference();
   }
 
   gEventTestRun.active = true;
@@ -2218,7 +2246,7 @@ void handleStartSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
 }
 
 void handleSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
-  constexpr int itemCount = 11;
+  constexpr int itemCount = 12;
 
   if (encoderDelta != 0) {
     gSettingsIndex += encoderDelta;
@@ -2236,15 +2264,19 @@ void handleSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
   switch (gSettingsIndex) {
     case 0: gCurrentScreen = Screen::PID; break;
     case 1: gCurrentScreen = Screen::MotorTune; break;
-    case 2: openDigitEditor("Front stop", "cm", &workingSettings.frontStopDistance_x100, 0, 9999, "Emergency stop if", "front gets too close", Screen::Settings); break;
-    case 3: openDigitEditor("Wall thr", "cm", &workingSettings.corridorWallThreshold_x100, 0, 9999, "Wall limit for PID", "and finish detection", Screen::Settings); break;
-    case 4: openDigitEditor("Turn detect", "cm", &workingSettings.turnDetectDistance_x100, 0, 9999, "Upper front range", "that still means turn", Screen::Settings); break;
-    case 5: openDigitEditor("Dead-end", "cm", &workingSettings.deadEndDistance_x100, 0, 9999, "Front distance limit", "for dead-end event", Screen::Settings); break;
-    case 6: openDigitEditor("Finish", "cm", &workingSettings.finishDistance_x100, 0, 9999, "Front distance needed", "before finish counts", Screen::Settings); break;
-    case 7: openDigitEditor("Check gap", "s", &workingSettings.sensingInterval_x100, 1, 9999, "Time between event", "verification checks", Screen::Settings); break;
-    case 8: openDigitEditor("Match N", "x", &workingSettings.eventConfirmCount, 1, 9, "How many identical", "events confirm state", Screen::Settings); break;
-    case 9: openDigitEditor("IR stable", "s", &workingSettings.irStableTime_x100, 1, 9999, "How long IR mask", "must stay unchanged", Screen::Settings); break;
-    case 10: gCurrentScreen = Screen::Root; break;
+    case 2:
+      workingSettings.imuEnabled = workingSettings.imuEnabled ? 0 : 1;
+      commitRuntimeConfig();
+      break;
+    case 3: openDigitEditor("Front stop", "cm", &workingSettings.frontStopDistance_x100, 0, 9999, "Emergency stop if", "front gets too close", Screen::Settings); break;
+    case 4: openDigitEditor("Wall thr", "cm", &workingSettings.corridorWallThreshold_x100, 0, 9999, "Wall limit for PID", "and finish detection", Screen::Settings); break;
+    case 5: openDigitEditor("Turn detect", "cm", &workingSettings.turnDetectDistance_x100, 0, 9999, "Upper front range", "that still means turn", Screen::Settings); break;
+    case 6: openDigitEditor("Dead-end", "cm", &workingSettings.deadEndDistance_x100, 0, 9999, "Front distance limit", "for dead-end event", Screen::Settings); break;
+    case 7: openDigitEditor("Finish", "cm", &workingSettings.finishDistance_x100, 0, 9999, "Front distance needed", "before finish counts", Screen::Settings); break;
+    case 8: openDigitEditor("Check gap", "s", &workingSettings.sensingInterval_x100, 1, 9999, "Time between event", "verification checks", Screen::Settings); break;
+    case 9: openDigitEditor("Match N", "x", &workingSettings.eventConfirmCount, 1, 9, "How many identical", "events confirm state", Screen::Settings); break;
+    case 10: openDigitEditor("IR stable", "s", &workingSettings.irStableTime_x100, 1, 9999, "How long IR mask", "must stay unchanged", Screen::Settings); break;
+    case 11: gCurrentScreen = Screen::Root; break;
     default: break;
   }
 }
@@ -2440,7 +2472,7 @@ void handleImuTestInput(ButtonEvent buttonEvent) {
 
 void handleImuYawTestInput(ButtonEvent buttonEvent) {
   if (buttonEvent == ButtonEvent::ShortPress) {
-    if (gImu.available) {
+    if (imuUsageEnabled()) {
       gImu.yawDeg = 0.0f;
       (void)captureImuReference();
     }
@@ -2800,21 +2832,22 @@ void drawStartSettingsScreen() {
 
 void drawSettingsScreen() {
   drawHeader("Settings");
-  char items[11][28];
+  char items[12][28];
   snprintf(items[0], sizeof(items[0]), "PID");
   snprintf(items[1], sizeof(items[1]), "Motor Tune");
-  snprintf(items[2], sizeof(items[2]), "FrontStop:%d.%02d", activeSettings.frontStopDistance_x100 / 100, activeSettings.frontStopDistance_x100 % 100);
-  snprintf(items[3], sizeof(items[3]), "WallThr:%d.%02d", activeSettings.corridorWallThreshold_x100 / 100, activeSettings.corridorWallThreshold_x100 % 100);
-  snprintf(items[4], sizeof(items[4]), "TurnDet:%d.%02d", activeSettings.turnDetectDistance_x100 / 100, activeSettings.turnDetectDistance_x100 % 100);
-  snprintf(items[5], sizeof(items[5]), "DeadEnd:%d.%02d", activeSettings.deadEndDistance_x100 / 100, activeSettings.deadEndDistance_x100 % 100);
-  snprintf(items[6], sizeof(items[6]), "Finish:%d.%02d", activeSettings.finishDistance_x100 / 100, activeSettings.finishDistance_x100 % 100);
-  snprintf(items[7], sizeof(items[7]), "CheckGap:%d.%02d", activeSettings.sensingInterval_x100 / 100, activeSettings.sensingInterval_x100 % 100);
-  snprintf(items[8], sizeof(items[8]), "Match N:%d", activeSettings.eventConfirmCount);
-  snprintf(items[9], sizeof(items[9]), "IRStable:%d.%02d", activeSettings.irStableTime_x100 / 100, activeSettings.irStableTime_x100 % 100);
-  snprintf(items[10], sizeof(items[10]), "Back");
-  const char* ptrs[11];
-  for (int i = 0; i < 11; ++i) ptrs[i] = items[i];
-  drawScrollableItemList(ptrs, 11, gSettingsIndex, 26);
+  snprintf(items[2], sizeof(items[2]), "IMU:%s", activeSettings.imuEnabled ? "ON" : "OFF");
+  snprintf(items[3], sizeof(items[3]), "FrontStop:%d.%02d", activeSettings.frontStopDistance_x100 / 100, activeSettings.frontStopDistance_x100 % 100);
+  snprintf(items[4], sizeof(items[4]), "WallThr:%d.%02d", activeSettings.corridorWallThreshold_x100 / 100, activeSettings.corridorWallThreshold_x100 % 100);
+  snprintf(items[5], sizeof(items[5]), "TurnDet:%d.%02d", activeSettings.turnDetectDistance_x100 / 100, activeSettings.turnDetectDistance_x100 % 100);
+  snprintf(items[6], sizeof(items[6]), "DeadEnd:%d.%02d", activeSettings.deadEndDistance_x100 / 100, activeSettings.deadEndDistance_x100 % 100);
+  snprintf(items[7], sizeof(items[7]), "Finish:%d.%02d", activeSettings.finishDistance_x100 / 100, activeSettings.finishDistance_x100 % 100);
+  snprintf(items[8], sizeof(items[8]), "CheckGap:%d.%02d", activeSettings.sensingInterval_x100 / 100, activeSettings.sensingInterval_x100 % 100);
+  snprintf(items[9], sizeof(items[9]), "Match N:%d", activeSettings.eventConfirmCount);
+  snprintf(items[10], sizeof(items[10]), "IRStable:%d.%02d", activeSettings.irStableTime_x100 / 100, activeSettings.irStableTime_x100 % 100);
+  snprintf(items[11], sizeof(items[11]), "Back");
+  const char* ptrs[12];
+  for (int i = 0; i < 12; ++i) ptrs[i] = items[i];
+  drawScrollableItemList(ptrs, 12, gSettingsIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Long: root");
 }
@@ -2865,11 +2898,20 @@ void drawIMUTestScreen() {
   drawHeader("IMU Test");
   u8g2.setFont(u8g2_font_5x7_tf);
 
+  if (!activeSettings.imuEnabled) {
+    u8g2.drawStr(0, 22, "IMU is OFF");
+    u8g2.drawStr(0, 31, "Enable it in");
+    u8g2.drawStr(0, 40, "Settings -> IMU");
+    u8g2.drawStr(0, 49, "to use it globally");
+    u8g2.drawStr(0, 63, "Long=back");
+    return;
+  }
+
   if (!gImu.available) {
-    u8g2.drawStr(0, 22, "IMU unavailable");
-    u8g2.drawStr(0, 31, "Install Arduino_");
-    u8g2.drawStr(0, 40, "LSM6DSOX and");
-    u8g2.drawStr(0, 49, "use Nano RP2040");
+    u8g2.drawStr(0, 22, "IMU init failed");
+    u8g2.drawStr(0, 31, "Library is used,");
+    u8g2.drawStr(0, 40, "but IMU.begin()");
+    u8g2.drawStr(0, 49, "returned false");
     u8g2.drawStr(0, 63, "Long=back");
     return;
   }
@@ -2892,8 +2934,15 @@ void drawIMUYawTestScreen() {
   drawHeader("Yaw Test");
   u8g2.setFont(u8g2_font_5x8_tf);
 
+  if (!activeSettings.imuEnabled) {
+    u8g2.drawStr(0, 22, "IMU is OFF");
+    u8g2.drawStr(0, 31, "Enable in Settings");
+    u8g2.drawStr(0, 63, "Hold=back");
+    return;
+  }
+
   if (!gImu.available) {
-    u8g2.drawStr(0, 22, "IMU unavailable");
+    u8g2.drawStr(0, 22, "IMU init failed");
     u8g2.drawStr(0, 63, "Hold=back");
     return;
   }
@@ -2919,8 +2968,15 @@ void drawIMUPIDTestScreen() {
   drawHeader("IMU PID");
   u8g2.setFont(u8g2_font_5x7_tf);
 
+  if (!activeSettings.imuEnabled) {
+    u8g2.drawStr(0, 24, "IMU is OFF");
+    u8g2.drawStr(0, 33, "Enable in Settings");
+    u8g2.drawStr(0, 63, "Long=back");
+    return;
+  }
+
   if (!gImu.available) {
-    u8g2.drawStr(0, 24, "IMU unavailable");
+    u8g2.drawStr(0, 24, "IMU init failed");
     u8g2.drawStr(0, 63, "Long=back");
     return;
   }
