@@ -1,0 +1,83 @@
+test_full_v36 summary
+=====================
+
+Date
+----
+- Day: 2026-04-14
+- Time: 21:36:37 +01:00
+- Author: OpenAI Codex
+
+Base
+----
+- Created as a new clean version from `test_full_v35.ino`
+- Keeps the live control logic from v34/v35
+- Purpose of v36: document the actual motor inputs produced by the ultrasonic PID path for different left/right ultrasonic readings
+
+Updated files
+-------------
+- test_full_v36.ino
+- test_full_v36_summary.txt
+- test_full_v36_settings_layout.csv
+
+What changed in v36
+-------------------
+- No firmware logic changes were made in this pass
+- Added a motor-input analysis block to the CSV so the file is chart-ready in Excel
+- Added text-bar graph columns to the CSV so the table also contains an at-a-glance visual view
+- Documented the exact mixer assumptions used for the motor-input calculations
+
+Motor-input path checked
+------------------------
+1. `computePid()` generates the lateral ultrasonic correction.
+2. `followSmart()` sends that correction into `driveRobotFrame(lateral, forward, rotation, heading)`.
+3. For `Heading::North`, the body-frame commands are:
+   - `vx = lateral`
+   - `vy = forward`
+4. `driveBodyFrame(vx, vy, w)` builds the wheel commands:
+   - `basePlus = vy + vx`
+   - `baseMinus = vy - vx`
+   - `FL_pre = basePlus + w`
+   - `FR_pre = baseMinus - w`
+   - `RR_pre = basePlus - w`
+   - `RL_pre = baseMinus + w`
+5. `writeServoCommand()` applies motor inversion and converts the final command to microseconds:
+   - `FL_us = 1500 + 500 * FL_cmd`
+   - `FR_us = 1500 + 500 * FR_cmd`
+   - `RR_us = 1500 + 500 * RR_cmd`
+   - `RL_us = 1500 + 500 * RL_cmd`
+
+Assumptions used for the added table
+------------------------------------
+- Mode: `TwoWall`
+- Heading: `North`
+- Base forward speed: `0.35`
+- Rotation command: `0.00`
+- `P = 0.07`
+- `I = 0.00`
+- `D = 0.00`
+- `Curve b = 1.00`
+- `Left Output Scale = 1.00`
+- `Right Output Scale = 1.00`
+- `Left Drive Scale = 1.00`
+- `Right Drive Scale = 1.00`
+- Tested difference range: `R - L = -8 cm ... +8 cm`
+- In this range, no final wheel normalization is triggered
+
+Important interpretation note
+-----------------------------
+- Positive `R - L` means the right wall is farther than the left wall
+- Positive lateral PID output means the robot is commanded to shift toward the robot-right side
+- The CSV values are the actual post-inversion motor commands that reach the servo conversion step
+
+Graph format in the CSV
+-----------------------
+- Each motor also has a text graph column
+- Graph strings use a center marker `|`
+- Left-pointing commands are shown with repeated `<`
+- Right-pointing commands are shown with repeated `>`
+- The bar length is `round(abs(cmd) * 10)`
+
+Verification status
+-------------------
+- Source-level analysis only
+- arduino-cli is not installed in this workspace, so no board compile was run here

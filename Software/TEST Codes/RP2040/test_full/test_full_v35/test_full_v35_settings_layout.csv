@@ -11,9 +11,9 @@ Root,Main menu,Ultrasonic Test,Navigation,-,Shows live ultrasonic readings and i
 Start Settings,All runs,Route Mode,Shared,mode,Selects how the next run chooses branches: sequence right left or selection.
 Start Settings,All runs,Start Direction,Shared,direction,Sets the initial robot heading used at the beginning of a run.
 Start Settings,All runs,Turn Wait,Shared,s,Pause time after stopping at a wall and before changing heading.
-Settings,All runs,IMU On/Off,Shared,toggle,Globally enables or disables IMU use in all events tests and drive functions.
+Settings,All runs,IMU On/Off,Shared,toggle,Globally enables or disables IMU use in all events tests and drive functions; default is OFF in v34.
 Settings,All runs,Front Stop,Shared,cm,Front ultrasonic safety-stop threshold.
-Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection.
+Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection; live control now adds hysteresis around this threshold.
 Settings,All runs,Turn Detect,Shared,cm,Upper front-distance range that can still be classified as turn or junction geometry.
 Settings,All runs,Dead-End,Shared,cm,Front distance at or below which the robot can classify the path as a dead-end zone.
 Settings,All runs,Finish,Shared,cm,Front distance required before finish can be accepted when the finish-specific geometry also matches.
@@ -24,7 +24,7 @@ PID,All runs,P Gain,Shared,x,Proportional steering gain for wall-follow PID.
 PID,All runs,I Gain,Shared,x,Integral steering gain for steady-state bias correction.
 PID,All runs,D Gain,Shared,x,Derivative steering gain for damping and fast-response control.
 PID,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before the PID controller is applied.
-PID,All runs,1-wall Target,Shared,cm,Desired side distance when only one reliable wall is visible.
+PID,All runs,1-wall Target,Shared,cm,Fallback side distance only when no recent real wall memory exists; normal 1-wall PID now inherits recent measured wall spacing.
 PID,All runs,Left Output Scale,Shared,x,Extra output scale applied when the final correction command points left.
 PID,All runs,Right Output Scale,Shared,x,Extra output scale applied when the final correction command points right.
 PID,All runs,PID Test,Navigation,-,Shows the wall-following PID interpretation screen for the currently selected heading.
@@ -33,7 +33,7 @@ PID,All runs,IMU I Gain,Shared,x,Integral gain for slow yaw drift that accumulat
 PID,All runs,IMU D Gain,Shared,x,Derivative gain that damps fast rotational disturbances measured by the built-in IMU.
 PID,All runs,IMU Extra Threshold,Shared,deg,Additional angular threshold added on top of the propagated LSM6DSOX measurement uncertainty before yaw compensation reacts.
 PID,All runs,IMU Rotation Sign,Shared,sign,Flips the global IMU rotational compensation direction between +1 and -1 if the chassis turns the wrong way.
-PID,All runs,IMU PID Test,Navigation,-,Runs a pure-rotation IMU recovery test; short press stores the current body frame as the new initial coordinates.
+PID,All runs,IMU PID Test,Navigation,-,Runs a pure-rotation IMU recovery test; short press captures the current pose and arms the live recovery loop.
 IR Test,All runs,Check Gap,Shared,s,Same global event-verification gap used by execution and event tests.
 IR Test,All runs,Match N,Shared,count,Same global number of identical repeated events required for confirmation.
 IR Test,All runs,IR Stable,Shared,s,Same global IR stabilization time used before new IR states are trusted.

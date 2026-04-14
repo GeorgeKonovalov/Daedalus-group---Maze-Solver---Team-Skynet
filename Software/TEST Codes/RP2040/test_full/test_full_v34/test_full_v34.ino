@@ -1,4 +1,3 @@
-#if 0
 #include <Arduino.h>
 #include <Wire.h>
 #include <U8g2lib.h>
@@ -57,6 +56,7 @@ constexpr uint8_t CORRIDOR_CONFIRM_SAMPLES = 3;
 constexpr float SENSOR_MAX_VALID_CM = 60.0f;
 constexpr float PID_INTERPRET_LIMIT_CM = 0.6f;
 constexpr float PID_INTEGRAL_LIMIT = 40.0f;
+constexpr float PID_SOURCE_HYSTERESIS_CM = 0.75f;
 constexpr float IMU_PID_INTEGRAL_LIMIT = 120.0f;
 constexpr uint16_t IMU_REFERENCE_SAMPLES = 64;
 constexpr uint16_t IMU_REFERENCE_SAMPLE_DELAY_MS = 5;
@@ -66,7 +66,12 @@ constexpr float IMU_GYRO_SENS_TOL = 0.01f;             // LSM6DSOX G_So%
 constexpr float IMU_ACCEL_ZERO_G_OFFSET_G = 0.020f;    // LSM6DSOX LA_TyOff
 constexpr float IMU_ACCEL_RMS_NOISE_G = 0.0018f;       // LSM6DSOX RMS @ +/-2 g
 constexpr float IMU_REFERENCE_MIN_Z_G = 0.25f;
-constexpr float IMU_YAW_SIGN = 1.0f;                   // Flip if the board is mounted upside down.
+constexpr float IMU_CAPTURE_MAX_GYRO_DPS = 2.5f;       // Reject reference capture while the robot is still rotating.
+constexpr float IMU_CAPTURE_MAX_NORM_ERR_G = 0.15f;    // Reject reference capture if the board is being shaken.
+constexpr float IMU_GYRO_SOFT_ZONE_DPS = 0.35f;        // Low-rate smoothing zone to avoid stick-slip yaw integration.
+constexpr float IMU_ERROR_FULL_SCALE_DEG = 45.0f;      // IMU PID works on normalized yaw error instead of raw degrees.
+constexpr float IMU_OUTPUT_SLEW_PER_S = 2.0f;          // Limit yaw-hold output steps so the chassis does not snap.
+constexpr float IMU_REANCHOR_HOLD_S = 0.35f;           // Briefly pause compensation after a fresh reference capture.
 
 // ======================================================
 // Settings storage (fixed-point x100)
@@ -76,7 +81,8 @@ struct RuntimeSettings {
   int i_x100 = 0;
   int d_x100 = 0;
   // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
-  uint8_t imuEnabled = 1;
+  uint8_t imuEnabled = 0;
+  int imuSign_x100 = 100;
   int imuP_x100 = 6;
   int imuI_x100 = 0;
   int imuD_x100 = 0;
@@ -108,7 +114,8 @@ struct RuntimeConfig {
   float p = 0.0f;
   float i = 0.0f;
   float d = 0.0f;
-  bool imuEnabled = true;
+  bool imuEnabled = false;
+  float imuSign = 1.0f;
   float imuP = 0.0f;
   float imuI = 0.0f;
   float imuD = 0.0f;
@@ -307,6 +314,15 @@ struct PidRuntime {
   uint32_t previousMs = 0;
 };
 
+struct WallReferenceState {
+  // These remembered side-wall distances make the 1-wall PID inherit the
+  // last real corridor geometry instead of snapping back to a fixed menu target.
+  bool leftValid = false;
+  bool rightValid = false;
+  float leftCm = 0.0f;
+  float rightCm = 0.0f;
+};
+
 struct ImuReference {
   bool valid = false;
   float yawDeg = 0.0f;
@@ -342,6 +358,7 @@ struct ImuState {
   float combinedDeadbandDeg = 0.0f;
   float lastCompensationCmd = 0.0f;
   uint32_t lastSampleMs = 0;
+  uint32_t compensationHoldUntilMs = 0;
   ImuReference reference;
 };
 
@@ -421,8 +438,11 @@ PlannerState gPlanner;
 ExecutiveState gExecutive;
 EventTestState gEventTestRun;
 PidRuntime gPid;
+WallReferenceState gWallRef;
 ImuPidRuntime gImuPid;
 ImuState gImu;
+PidSource gActivePidSource = PidSource::None;
+bool gImuPidTestArmed = false;
 
 Screen gCurrentScreen = Screen::Root;
 Screen gPreviousScreen = Screen::Root;
@@ -482,10 +502,13 @@ void onAnyIrChange();
 
 void commitRuntimeConfig();
 void resetPid();
+void resetDrivePidControl();
 void resetImuPid();
 bool imuHardwareReady();
 bool imuUsageEnabled();
 void clearImuReference();
+void holdImuCompensation(float seconds);
+bool imuCaptureSampleLooksStill(float ax, float ay, float az, float gx, float gy, float gz);
 
 float fixedToFloat(int value);
 int clampInt(int value, int minValue, int maxValue);
@@ -538,6 +561,9 @@ float shapedMagnitude(float magnitude);
 float shapeSignedError(float error);
 float computePid(float error);
 float computeWallError(const PerceptionFrame& frame, PidSource source);
+void resetWallReference();
+void updateWallReference(const PerceptionFrame& frame);
+PidSource stabilizedPidSource(const PerceptionFrame& frame, PidSource previousSource);
 void writeServoCommand(Servo& servo, int stopAngle, int rangeAngle, int invert, float cmd);
 void stopAll();
 void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Heading heading);
@@ -706,6 +732,7 @@ void commitRuntimeConfig() {
   gCfg.i = fixedToFloat(activeSettings.i_x100);
   gCfg.d = fixedToFloat(activeSettings.d_x100);
   gCfg.imuEnabled = (activeSettings.imuEnabled != 0);
+  gCfg.imuSign = (activeSettings.imuSign_x100 < 0) ? -1.0f : 1.0f;
   gCfg.imuP = fixedToFloat(activeSettings.imuP_x100);
   gCfg.imuI = fixedToFloat(activeSettings.imuI_x100);
   gCfg.imuD = fixedToFloat(activeSettings.imuD_x100);
@@ -733,6 +760,7 @@ void commitRuntimeConfig() {
   if (!gCfg.imuEnabled) {
     clearImuReference();
     resetImuPid();
+    gImuPidTestArmed = false;
   }
 }
 
@@ -740,6 +768,72 @@ void resetPid() {
   gPid.previousError = 0.0f;
   gPid.integral = 0.0f;
   gPid.previousMs = millis();
+}
+
+void resetDrivePidControl() {
+  // A wall-source change means the PID error now has a different physical meaning,
+  // so both controller memory and the held source selection need a clean reset.
+  resetPid();
+  gActivePidSource = PidSource::None;
+}
+
+void resetWallReference() {
+  gWallRef.leftValid = false;
+  gWallRef.rightValid = false;
+  gWallRef.leftCm = 0.0f;
+  gWallRef.rightCm = 0.0f;
+}
+
+void updateWallReference(const PerceptionFrame& frame) {
+  // Smoothly remember the last reliable side-wall distance so a 2-wall -> 1-wall
+  // transition does not suddenly jump to a fixed target from the menu.
+  constexpr float memoryBlend = 0.25f;
+
+  if (!frame.ultrasonicValid) return;
+
+  if (frame.left <= gCfg.corridorWallThresholdCm) {
+    if (!gWallRef.leftValid) {
+      gWallRef.leftCm = frame.left;
+      gWallRef.leftValid = true;
+    } else {
+      gWallRef.leftCm = (1.0f - memoryBlend) * gWallRef.leftCm + memoryBlend * frame.left;
+    }
+  }
+
+  if (frame.right <= gCfg.corridorWallThresholdCm) {
+    if (!gWallRef.rightValid) {
+      gWallRef.rightCm = frame.right;
+      gWallRef.rightValid = true;
+    } else {
+      gWallRef.rightCm = (1.0f - memoryBlend) * gWallRef.rightCm + memoryBlend * frame.right;
+    }
+  }
+}
+
+static bool wallStillPresent(float distanceCm, bool wasPresent) {
+  float thresholdCm = wasPresent
+                        ? (gCfg.corridorWallThresholdCm + PID_SOURCE_HYSTERESIS_CM)
+                        : gCfg.corridorWallThresholdCm;
+  return distanceCm <= thresholdCm;
+}
+
+PidSource stabilizedPidSource(const PerceptionFrame& frame, PidSource previousSource) {
+  if (!frame.ultrasonicValid) {
+    return PidSource::None;
+  }
+
+  bool previousLeftWall =
+    previousSource == PidSource::LeftWall || previousSource == PidSource::TwoWall;
+  bool previousRightWall =
+    previousSource == PidSource::RightWall || previousSource == PidSource::TwoWall;
+
+  bool leftWall = wallStillPresent(frame.left, previousLeftWall);
+  bool rightWall = wallStillPresent(frame.right, previousRightWall);
+
+  if (leftWall && rightWall) return PidSource::TwoWall;
+  if (leftWall) return PidSource::LeftWall;
+  if (rightWall) return PidSource::RightWall;
+  return PidSource::None;
 }
 
 void resetImuPid() {
@@ -764,6 +858,24 @@ void clearImuReference() {
   gImu.measurementAngleTolDeg = 0.0f;
   gImu.combinedDeadbandDeg = 0.0f;
   gImu.lastCompensationCmd = 0.0f;
+  gImu.compensationHoldUntilMs = 0;
+}
+
+void holdImuCompensation(float seconds) {
+  // A short hold keeps the controller from fighting a heading that we just changed on purpose.
+  uint32_t holdUntilMs = millis() + secondsToMs(seconds);
+  if (holdUntilMs > gImu.compensationHoldUntilMs) {
+    gImu.compensationHoldUntilMs = holdUntilMs;
+  }
+  resetImuPid();
+}
+
+bool imuCaptureSampleLooksStill(float ax, float ay, float az, float gx, float gy, float gz) {
+  // Reference capture is only trusted while the rover is stationary enough that gyro bias is meaningful.
+  float accelNormG = sqrtf(ax * ax + ay * ay + az * az);
+  float gyroNormDps = sqrtf(gx * gx + gy * gy + gz * gz);
+  return fabsf(accelNormG - 1.0f) <= IMU_CAPTURE_MAX_NORM_ERR_G &&
+         gyroNormDps <= IMU_CAPTURE_MAX_GYRO_DPS;
 }
 
 Heading headingFromIndex(uint8_t index) {
@@ -1296,9 +1408,12 @@ void updateImu() {
     gImu.lastSampleMs = now;
     gImu.sampleDtS = dt;
 
-    float yawRateDps = (gImu.gz - gImu.gyroBiasZDps) * IMU_YAW_SIGN;
-    if (fabsf(yawRateDps) <= imuGyroRateFloorDps()) {
-      yawRateDps = 0.0f;
+    float yawRateDps = (gImu.gz - gImu.gyroBiasZDps) * gCfg.imuSign;
+    float absYawRateDps = fabsf(yawRateDps);
+    if (absYawRateDps < IMU_GYRO_SOFT_ZONE_DPS) {
+      // Use a smooth low-rate taper instead of a hard dead zone so slow real turns do not accumulate late.
+      float scale = absYawRateDps / IMU_GYRO_SOFT_ZONE_DPS;
+      yawRateDps *= scale * scale;
     }
 
     gImu.yawRateDps = yawRateDps;
@@ -1318,9 +1433,15 @@ bool captureImuReference() {
   uint16_t goodSamples = 0;
   uint32_t startMs = millis();
 
-  for (uint16_t i = 0; i < IMU_REFERENCE_SAMPLES; ++i) {
+  // Allow extra attempts so we can reject moving samples instead of storing a bad reference.
+  for (uint16_t i = 0; i < IMU_REFERENCE_SAMPLES * 3 && goodSamples < IMU_REFERENCE_SAMPLES; ++i) {
     float ax, ay, az, gx, gy, gz;
     if (!sampleImuBlocking(ax, ay, az, gx, gy, gz)) {
+      continue;
+    }
+
+    if (!imuCaptureSampleLooksStill(ax, ay, az, gx, gy, gz)) {
+      delay(IMU_REFERENCE_SAMPLE_DELAY_MS);
       continue;
     }
 
@@ -1332,9 +1453,10 @@ bool captureImuReference() {
     delay(IMU_REFERENCE_SAMPLE_DELAY_MS);
   }
 
-  if (goodSamples == 0) {
+  if (goodSamples < (IMU_REFERENCE_SAMPLES / 2)) {
     gImu.reference.valid = false;
     gImu.referenceValid = false;
+    Serial.println("IMU reference rejected. Keep robot still during capture.");
     return false;
   }
 
@@ -1343,7 +1465,9 @@ bool captureImuReference() {
   gImu.reference.avgAy = sumAy * sampleScale;
   gImu.reference.avgAz = sumAz * sampleScale;
   gImu.gyroBiasZDps = sumGz * sampleScale;
-  gImu.reference.yawDeg = gImu.yawDeg;
+  // Re-zero yaw at capture time so the controller works on fresh relative rotation only.
+  gImu.yawDeg = 0.0f;
+  gImu.reference.yawDeg = 0.0f;
   yawAxisForAngle(gImu.reference.yawDeg, gImu.reference.xAxisX, gImu.reference.xAxisY);
   gImu.reference.yAxisX = -gImu.reference.xAxisY;
   gImu.reference.yAxisY = gImu.reference.xAxisX;
@@ -1359,6 +1483,7 @@ bool captureImuReference() {
   gImu.referenceValid = true;
 
   resetImuPid();
+  holdImuCompensation(IMU_REANCHOR_HOLD_S);
   updateImuDerivedState();
 
   Serial.print("IMU reference saved. biasZ[dps]=");
@@ -1408,6 +1533,8 @@ static bool rearPairOpen(const RelativeIrState& ir) {
 }
 
 PidSource choosePidSource(const PerceptionFrame& frame) {
+  // This is the raw threshold-only source used for perception displays.
+  // The live controller applies additional hysteresis in stabilizedPidSource().
   if (!frame.ultrasonicValid) return PidSource::None;
 
   bool leftWall = frame.left <= gCfg.corridorWallThresholdCm;
@@ -1647,10 +1774,14 @@ float computeWallError(const PerceptionFrame& frame, PidSource source) {
   switch (source) {
     case PidSource::TwoWall:
       return frame.right - frame.left;
-    case PidSource::LeftWall:
-      return gCfg.pidWallDistanceCm - frame.left;
-    case PidSource::RightWall:
-      return frame.right - gCfg.pidWallDistanceCm;
+    case PidSource::LeftWall: {
+      float targetLeftCm = gWallRef.leftValid ? gWallRef.leftCm : gCfg.pidWallDistanceCm;
+      return targetLeftCm - frame.left;
+    }
+    case PidSource::RightWall: {
+      float targetRightCm = gWallRef.rightValid ? gWallRef.rightCm : gCfg.pidWallDistanceCm;
+      return frame.right - targetRightCm;
+    }
     case PidSource::None:
     default:
       return 0.0f;
@@ -1703,6 +1834,14 @@ float applyImuCompensation(ImuPidRuntime& runtime) {
   dt = clampFloat(dt, 0.01f, 0.20f);
   runtime.previousMs = now;
 
+  if (now < gImu.compensationHoldUntilMs) {
+    // Intentional turns get a short quiet window so the IMU controller does not kick during settling.
+    runtime.previousError = 0.0f;
+    runtime.integral *= 0.80f;
+    gImu.lastCompensationCmd = 0.0f;
+    return 0.0f;
+  }
+
   if (fabsf(errorDeg) <= deadbandDeg) {
     runtime.previousError = 0.0f;
     runtime.integral *= 0.85f;
@@ -1713,16 +1852,21 @@ float applyImuCompensation(ImuPidRuntime& runtime) {
   float effectiveErrorDeg = (errorDeg > 0.0f)
                               ? (errorDeg - deadbandDeg)
                               : (errorDeg + deadbandDeg);
-  float derivative = (effectiveErrorDeg - runtime.previousError) / dt;
+  float normalizedError = effectiveErrorDeg / IMU_ERROR_FULL_SCALE_DEG;
+  float derivative = (normalizedError - runtime.previousError) / dt;
 
-  runtime.integral += effectiveErrorDeg * dt;
+  runtime.integral += normalizedError * dt;
   runtime.integral = clampFloat(runtime.integral, -IMU_PID_INTEGRAL_LIMIT, IMU_PID_INTEGRAL_LIMIT);
 
-  float output = gCfg.imuP * effectiveErrorDeg +
+  float output = gCfg.imuP * normalizedError +
                  gCfg.imuI * runtime.integral +
                  gCfg.imuD * derivative;
 
-  runtime.previousError = effectiveErrorDeg;
+  runtime.previousError = normalizedError;
+  float maxDelta = IMU_OUTPUT_SLEW_PER_S * dt;
+  output = clampFloat(output,
+                      gImu.lastCompensationCmd - maxDelta,
+                      gImu.lastCompensationCmd + maxDelta);
   output = clampFloat(output, -1.0f, 1.0f);
   gImu.lastCompensationCmd = output;
   return output;
@@ -1745,6 +1889,20 @@ void stopAll() {
   writeServoCommand(servoRL, STOP_RL, RANGE_RL, INV_RL, 0.0f);
 }
 
+static void normalizeWheelEnvelope(float& fl, float& fr, float& rr, float& rl) {
+  float maxAbs =
+    max(max(fabsf(fl), fabsf(fr)),
+        max(fabsf(rr), fabsf(rl)));
+
+  if (maxAbs > 1.0f) {
+    float scale = 1.0f / maxAbs;
+    fl *= scale;
+    fr *= scale;
+    rr *= scale;
+    rl *= scale;
+  }
+}
+
 /*
   45 degree omni X-drive layout
   -----------------------------
@@ -1757,43 +1915,34 @@ void stopAll() {
 
     spin = [+w, -w, -w, +w]
 
-  Instead of renormalizing all wheels afterward, w is clamped to the wheel headroom that
-  remains after translation. That preserves the exact left/right translation pattern
-  [+vx, -vx, +vx, -vx] mathematically whenever the translational command itself is valid.
+  Robust saturation policy:
+  1. Keep pure translation inside the wheel envelope first.
+  2. Add rotational compensation on top.
+  3. Renormalize the final four wheel commands together if needed.
+
+  This avoids impossible translation requests and keeps partial yaw authority
+  instead of dropping it to zero when the drive is heavily loaded.
 */
 static void driveBodyFrame(float vx, float vy, float w) {
   float basePlus = vy + vx;
   float baseMinus = vy - vx;
+  w = clampUnit(w);
 
-  float minW = -1000.0f;
-  float maxW = 1000.0f;
-
-  auto limitPlus = [&](float base, float scale) {
-    float wheelLimit = 1.0f / max(scale, 0.01f);
-    minW = max(minW, -wheelLimit - base);
-    maxW = min(maxW, wheelLimit - base);
-  };
-  auto limitMinus = [&](float base, float scale) {
-    float wheelLimit = 1.0f / max(scale, 0.01f);
-    minW = max(minW, base - wheelLimit);
-    maxW = min(maxW, base + wheelLimit);
-  };
-
-  limitPlus(basePlus, gCfg.leftDriveScale);   // FL:  basePlus + w
-  limitMinus(basePlus, gCfg.leftDriveScale);  // RR:  basePlus - w
-  limitMinus(baseMinus, gCfg.rightDriveScale);// FR:  baseMinus - w
-  limitPlus(baseMinus, gCfg.rightDriveScale); // RL:  baseMinus + w
-
-  if (minW > maxW) {
-    w = 0.0f;
-  } else {
-    w = clampFloat(w, minW, maxW);
+  float translationMax =
+    max(fabsf(basePlus) * gCfg.leftDriveScale,
+        fabsf(baseMinus) * gCfg.rightDriveScale);
+  if (translationMax > 1.0f) {
+    float translationScale = 1.0f / translationMax;
+    basePlus *= translationScale;
+    baseMinus *= translationScale;
   }
 
   float fl = (basePlus + w) * gCfg.leftDriveScale;
   float rr = (basePlus - w) * gCfg.leftDriveScale;
   float fr = (baseMinus - w) * gCfg.rightDriveScale;
   float rl = (baseMinus + w) * gCfg.rightDriveScale;
+
+  normalizeWheelEnvelope(fl, fr, rr, rl);
 
   writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, fl);
   writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, fr);
@@ -1841,13 +1990,21 @@ void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Head
 void followSmart(Heading heading, float forwardSpeed) {
   PerceptionFrame frame = buildPerceptionFrame(heading);
   if (!frame.ultrasonicValid) {
+    resetDrivePidControl();
     stopAll();
     return;
   }
 
+  updateWallReference(frame);
+  PidSource controlSource = stabilizedPidSource(frame, gActivePidSource);
+  if (controlSource != gActivePidSource) {
+    gActivePidSource = controlSource;
+    resetPid();
+  }
+
   float correction = 0.0f;
-  if (frame.pidSource != PidSource::None) {
-    correction = computePid(computeWallError(frame, frame.pidSource));
+  if (controlSource != PidSource::None) {
+    correction = computePid(computeWallError(frame, controlSource));
   }
 
   float rotationComp = applyImuCompensation(gImuPid);
@@ -1866,6 +2023,8 @@ static void resetPlannerCycleIfNeeded() {
 void beginExecution() {
   resetPlannerCycleIfNeeded();
   gPlanner.attemptCounter++;
+  resetWallReference();
+  gImuPidTestArmed = false;
 
   if (imuUsageEnabled()) {
     (void)captureImuReference();
@@ -1884,7 +2043,7 @@ void beginExecution() {
 
   resetEventConfirmation();
   resetCorridorConfirmation();
-  resetPid();
+  resetDrivePidControl();
   resetImuPid();
 
   gCurrentScreen = Screen::RunScreen;
@@ -1969,13 +2128,13 @@ void updateExecutive() {
 
         if (confirmed == EventType::DeadEnd) {
           gExecutive.heading = oppositeOf(gExecutive.heading);
-          resetPid();
+          resetDrivePidControl();
           enterPhase(NavState::AcquireCorridor, EventType::DeadEnd);
           return;
         }
 
         if (confirmed == EventType::TJunctionStraight) {
-          resetPid();
+          resetDrivePidControl();
           enterPhase(NavState::AcquireCorridor, EventType::TJunctionStraight);
           return;
         }
@@ -2013,7 +2172,7 @@ void updateExecutive() {
       stopAll();
       if ((millis() - gExecutive.phaseStartedMs) >= secondsToMs(gCfg.waitBeforeTurnS)) {
         gExecutive.heading = gExecutive.pendingHeading;
-        resetPid();
+        resetDrivePidControl();
         enterPhase(NavState::AcquireCorridor, gExecutive.latchedEvent);
       }
       return;
@@ -2026,7 +2185,7 @@ void updateExecutive() {
         return;
       }
       if (updateCorridorConfirmation(frame)) {
-        resetPid();
+        resetDrivePidControl();
         enterPhase(NavState::Corridor, EventType::Corridor);
         return;
       }
@@ -2037,7 +2196,7 @@ void updateExecutive() {
       gExecutive.displayEvent = EventType::SafetyStop;
       stopAll();
       if (updateCorridorConfirmation(frame)) {
-        resetPid();
+        resetDrivePidControl();
         enterPhase(NavState::Corridor, EventType::Corridor);
       }
       return;
@@ -2156,6 +2315,8 @@ static void startEventPhase(NavState state, EventType displayEvent) {
 }
 
 void startEventTestRun() {
+  resetWallReference();
+  gImuPidTestArmed = false;
   if (imuUsageEnabled()) {
     (void)captureImuReference();
   } else {
@@ -2172,7 +2333,7 @@ void startEventTestRun() {
   gEventTestRun.state = (gSelectedEventTest == EventTestCase::Start) ? NavState::StartSeek : NavState::Corridor;
   gEventTestRun.eventConfirm.active = false;
   gEventTestRun.corridorConfirm.active = false;
-  resetPid();
+  resetDrivePidControl();
   resetImuPid();
 }
 
@@ -2283,7 +2444,7 @@ void handleSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
 }
 
 void handlePidInput(int encoderDelta, ButtonEvent buttonEvent) {
-  constexpr int itemCount = 14;
+  constexpr int itemCount = 15;
   if (encoderDelta != 0) {
     gPidIndex += encoderDelta;
     if (gPidIndex < 0) gPidIndex = 0;
@@ -2305,12 +2466,22 @@ void handlePidInput(int encoderDelta, ButtonEvent buttonEvent) {
     case 5: openDigitEditor("Left out", "x", &workingSettings.pidLeftScale_x100, 10, 300, "Extra scale for", "left correction", Screen::PID); break;
     case 6: openDigitEditor("Right out", "x", &workingSettings.pidRightScale_x100, 10, 300, "Extra scale for", "right correction", Screen::PID); break;
     case 7: gPidTestHeading = headingFromIndex(activeSettings.startHeadingIndex); gCurrentScreen = Screen::PIDTest; break;
-    case 8: openDigitEditor("IMU P", "x", &workingSettings.imuP_x100, 0, 9999, "Yaw-hold proportional", "gain on angle error", Screen::PID); break;
-    case 9: openDigitEditor("IMU I", "x", &workingSettings.imuI_x100, 0, 9999, "Yaw-hold integral", "gain for slow drift", Screen::PID); break;
-    case 10: openDigitEditor("IMU D", "x", &workingSettings.imuD_x100, 0, 9999, "Yaw-hold derivative", "gain for twist damping", Screen::PID); break;
+    case 8: openDigitEditor("IMU P", "x", &workingSettings.imuP_x100, 0, 9999, "Yaw-hold proportional", "gain on 45deg error", Screen::PID); break;
+    case 9: openDigitEditor("IMU I", "x", &workingSettings.imuI_x100, 0, 9999, "Yaw-hold integral", "gain on stored drift", Screen::PID); break;
+    case 10: openDigitEditor("IMU D", "x", &workingSettings.imuD_x100, 0, 9999, "Yaw-hold derivative", "gain on error change", Screen::PID); break;
     case 11: openDigitEditor("IMU thr", "deg", &workingSettings.imuAngleThreshold_x100, 0, 4500, "Extra angle above", "sensor deadband", Screen::PID); break;
-    case 12: resetImuPid(); gCurrentScreen = Screen::IMUPIDTest; break;
-    case 13: gCurrentScreen = Screen::Settings; break;
+    case 12:
+      workingSettings.imuSign_x100 = (workingSettings.imuSign_x100 < 0) ? 100 : -100;
+      commitRuntimeConfig();
+      resetImuPid();
+      break;
+    case 13:
+      gImuPidTestArmed = false;
+      resetImuPid();
+      stopAll();
+      gCurrentScreen = Screen::IMUPIDTest;
+      break;
+    case 14: gCurrentScreen = Screen::Settings; break;
     default: break;
   }
 }
@@ -2325,9 +2496,15 @@ void handlePidTestInput(ButtonEvent buttonEvent) {
 
 void handleImuPidTestInput(ButtonEvent buttonEvent) {
   if (buttonEvent == ButtonEvent::ShortPress) {
-    (void)captureImuReference();
+    gImuPidTestArmed = captureImuReference();
+    if (!gImuPidTestArmed) {
+      resetImuPid();
+      stopAll();
+    }
   } else if (buttonEvent == ButtonEvent::LongPress) {
+    gImuPidTestArmed = false;
     resetImuPid();
+    stopAll();
     gCurrentScreen = Screen::PID;
   }
 }
@@ -2630,12 +2807,12 @@ void updateEventTestRun() {
         }
         if (confirmed == EventType::DeadEnd) {
           gEventTestRun.heading = oppositeOf(gEventTestRun.heading);
-          resetPid();
+          resetDrivePidControl();
           startEventPhase(NavState::AcquireCorridor, EventType::DeadEnd);
           return;
         }
         if (confirmed == EventType::TJunctionStraight) {
-          resetPid();
+          resetDrivePidControl();
           startEventPhase(NavState::AcquireCorridor, EventType::TJunctionStraight);
           return;
         }
@@ -2677,7 +2854,7 @@ void updateEventTestRun() {
       stopAll();
       if ((millis() - gEventTestRun.phaseStartedMs) >= secondsToMs(gCfg.waitBeforeTurnS)) {
         gEventTestRun.heading = gEventTestRun.pendingHeading;
-        resetPid();
+        resetDrivePidControl();
         startEventPhase(NavState::AcquireCorridor, gEventTestRun.latchedEvent);
       }
       return;
@@ -2778,17 +2955,6 @@ void drawScrollableItemList(const char* const* items, int itemCount, int selecte
     if (idx >= itemCount) break;
     drawMenuItem(startY + i * 10, idx == selectedIndex, items[idx]);
   }
-
-  if (itemCount > visibleCount) {
-    if (first > 0) {
-      u8g2.drawLine(122, 14, 124, 11);
-      u8g2.drawLine(124, 11, 126, 14);
-    }
-    if (first + visibleCount < itemCount) {
-      u8g2.drawLine(122, 58, 124, 61);
-      u8g2.drawLine(124, 61, 126, 58);
-    }
-  }
 }
 
 void drawRootScreen() {
@@ -2855,7 +3021,7 @@ void drawSettingsScreen() {
 
 void drawPIDScreen() {
   drawHeader("PID");
-  char items[14][28];
+  char items[15][28];
   snprintf(items[0], sizeof(items[0]), "P:%d.%02d", activeSettings.p_x100 / 100, activeSettings.p_x100 % 100);
   snprintf(items[1], sizeof(items[1]), "I:%d.%02d", activeSettings.i_x100 / 100, activeSettings.i_x100 % 100);
   snprintf(items[2], sizeof(items[2]), "D:%d.%02d", activeSettings.d_x100 / 100, activeSettings.d_x100 % 100);
@@ -2868,11 +3034,12 @@ void drawPIDScreen() {
   snprintf(items[9], sizeof(items[9]), "IMUI:%d.%02d", activeSettings.imuI_x100 / 100, activeSettings.imuI_x100 % 100);
   snprintf(items[10], sizeof(items[10]), "IMUD:%d.%02d", activeSettings.imuD_x100 / 100, activeSettings.imuD_x100 % 100);
   snprintf(items[11], sizeof(items[11]), "IMUThr:%d.%02d", activeSettings.imuAngleThreshold_x100 / 100, activeSettings.imuAngleThreshold_x100 % 100);
-  snprintf(items[12], sizeof(items[12]), "IMU PID Test");
-  snprintf(items[13], sizeof(items[13]), "Back");
-  const char* ptrs[14];
-  for (int i = 0; i < 14; ++i) ptrs[i] = items[i];
-  drawScrollableItemList(ptrs, 14, gPidIndex, 26);
+  snprintf(items[12], sizeof(items[12]), "IMUSign:%+d", (activeSettings.imuSign_x100 < 0) ? -1 : 1);
+  snprintf(items[13], sizeof(items[13]), "IMU PID Test");
+  snprintf(items[14], sizeof(items[14]), "Back");
+  const char* ptrs[15];
+  for (int i = 0; i < 15; ++i) ptrs[i] = items[i];
+  drawScrollableItemList(ptrs, 15, gPidIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Long: settings");
 }
@@ -2880,6 +3047,7 @@ void drawPIDScreen() {
 void drawPIDTestScreen() {
   drawHeader("PID Test");
   PerceptionFrame frame = buildPerceptionFrame(gPidTestHeading);
+  updateWallReference(frame);
   float rawError = computeWallError(frame, frame.pidSource);
   float shaped = shapeSignedError(rawError);
   u8g2.setFont(u8g2_font_5x7_tf);
@@ -2983,21 +3151,21 @@ void drawIMUPIDTestScreen() {
   }
 
   char line[32];
+  snprintf(line, sizeof(line), "Armed:%c Ref:%c", gImuPidTestArmed ? 'Y' : 'N', gImu.referenceValid ? 'Y' : 'N');
+  u8g2.drawStr(0, 18, line);
   if (gImu.referenceValid) {
     snprintf(line, sizeof(line), "Ref:(%+1.2f,%+1.2f)", gImu.reference.xAxisX, gImu.reference.xAxisY);
   } else {
     snprintf(line, sizeof(line), "Ref:not saved");
   }
-  u8g2.drawStr(0, 18, line);
-  snprintf(line, sizeof(line), "Cur:(%+1.2f,%+1.2f)", gImu.currentXAxisX, gImu.currentXAxisY);
   u8g2.drawStr(0, 27, line);
-  snprintf(line, sizeof(line), "Err:%+2.2f Db:%2.2f", gImu.yawErrorDeg, gImu.combinedDeadbandDeg);
+  snprintf(line, sizeof(line), "Cur:(%+1.2f,%+1.2f)", gImu.currentXAxisX, gImu.currentXAxisY);
   u8g2.drawStr(0, 36, line);
-  snprintf(line, sizeof(line), "Cmd:%+1.3f Bias:%+2.2f", gImu.lastCompensationCmd, gImu.gyroBiasZDps);
+  snprintf(line, sizeof(line), "Err:%+2.2f Db:%2.2f", gImu.yawErrorDeg, gImu.combinedDeadbandDeg);
   u8g2.drawStr(0, 45, line);
-  snprintf(line, sizeof(line), "A0:(%+1.3f,%+1.3f)", gImu.reference.avgAx, gImu.reference.avgAy);
+  snprintf(line, sizeof(line), "Cmd:%+1.2f S:%+d B:%+1.1f", gImu.lastCompensationCmd, (activeSettings.imuSign_x100 < 0) ? -1 : 1, gImu.gyroBiasZDps);
   u8g2.drawStr(0, 54, line);
-  u8g2.drawStr(0, 63, "Short=save Hold=back");
+  u8g2.drawStr(0, 63, "Short=arm Hold=back");
 }
 
 void drawMotorTuneScreen() {
@@ -3421,7 +3589,7 @@ void setup() {
   gStableIrMask = gRawIrMask;
   gIrCandidateSinceMs = millis();
   gPreviewHeading = headingFromIndex(activeSettings.startHeadingIndex);
-  resetPid();
+  resetDrivePidControl();
   resetImuPid();
 }
 
@@ -3456,7 +3624,16 @@ void loop() {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleImuPidTestInput(buttonEvent);
     if (gCurrentScreen == Screen::IMUPIDTest) {
-      (void)applyImuCompensation(gImuPid);
+      if (gImuPidTestArmed && imuUsageEnabled() && gImu.referenceValid) {
+        // The IMU PID test reuses the live yaw-hold path with zero translation
+        // so we can tune pure rotational recovery without wall-PID influence.
+        float rotationComp = applyImuCompensation(gImuPid);
+        driveRobotFrame(0.0f, 0.0f, rotationComp, Heading::North);
+      } else {
+        stopAll();
+      }
+    } else {
+      stopAll();
     }
   } else {
     ButtonEvent buttonEvent = readButtonEvent(true);
@@ -3465,4 +3642,3 @@ void loop() {
 
   drawUI();
 }
-#endif

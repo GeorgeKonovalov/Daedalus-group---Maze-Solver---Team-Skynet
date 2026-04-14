@@ -24,7 +24,7 @@ PID,All runs,P Gain,Shared,x,Proportional steering gain for wall-follow PID.
 PID,All runs,I Gain,Shared,x,Integral steering gain for steady-state bias correction.
 PID,All runs,D Gain,Shared,x,Derivative steering gain for damping and fast-response control.
 PID,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before the PID controller is applied.
-PID,All runs,1-wall Target,Shared,cm,Desired side distance when only one reliable wall is visible.
+PID,All runs,1-wall Target,Shared,cm,Fallback side distance only when no recent real wall memory exists; normal 1-wall PID now inherits recent measured wall spacing.
 PID,All runs,Left Output Scale,Shared,x,Extra output scale applied when the final correction command points left.
 PID,All runs,Right Output Scale,Shared,x,Extra output scale applied when the final correction command points right.
 PID,All runs,PID Test,Navigation,-,Shows the wall-following PID interpretation screen for the currently selected heading.

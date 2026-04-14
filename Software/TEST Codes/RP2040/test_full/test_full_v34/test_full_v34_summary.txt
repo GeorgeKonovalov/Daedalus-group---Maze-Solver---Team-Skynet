@@ -1,40 +1,36 @@
-test_full_v31 summary
+test_full_v34 summary
 =====================
 
 Date
 ----
 - Day: 2026-04-14
-- Time: 20:02:21 +01:00
+- Time: 20:41:45 +01:00
 - Author: OpenAI Codex
 
 Base
 ----
-- Created as a new version from test_full_v29.ino
-- Keeps the renewed logic from v29 and adds an IMU robustness pass focused on wrong-sign correction, overshoot, and shake
+- Created as a new clean version from `test_full_v33.ino`
+- Keeps the IMU robustness pass from v31/v33 and the old highlight-style menu layout
+- Purpose of v34: fix mixer saturation, PID-source handoff, IMU PID test behavior, and default IMU usage
 
 Updated files
 -------------
-- test_full_v31.ino
-- test_full_v31_summary.txt
-- test_full_v31_settings_layout.csv
+- test_full_v34.ino
+- test_full_v34_summary.txt
+- test_full_v34_settings_layout.csv
 
-New IMU work in this version
-----------------------------
-- Added support for the built-in Nano RP2040 Connect IMU via `Arduino_LSM6DSOX`
-- Added tolerance-aware yaw-hold compensation using the onboard LSM6DSOX gyroscope
-- Yaw hold is relative to the saved start frame; the board has no magnetometer, so this is not an absolute compass heading
-- Added `IMU Test` to the root menu for raw `ax ay az gx gy gz` visibility
-- Added `Yaw Test` to the root menu for a yaw-only validation view
-- Added `IMU PID Test` to the PID menu with:
-  - live reference-vs-current x-axis vectors
-  - propagated deadband based on official sensor tolerances
-  - live rotational compensation preview
-  - short-press capture of the current body frame as the new initial coordinates
-- Added editable `IMU P`, `IMU I`, `IMU D`, and `IMU threshold` settings in the PID menu
-- Renewed the X-drive mixer to combine translation and rotational compensation without renormalizing away the commanded left/right direction
+New control fixes in v34
+------------------------
+- IMU is now OFF by default
+- `IMU PID Test` is now explicitly armed by short-press reference capture before it drives
+- `IMU PID Test` reuses the live `applyImuCompensation()` plus `driveRobotFrame()` path with zero translation
+- The wheel mixer now normalizes translation before yaw is added, and then normalizes the final 4 wheel commands together
+- The wheel mixer no longer drops yaw authority completely when translation uses most of the wheel envelope
+- Wall-PID source selection now uses hysteresis around the wall threshold
+- Wall PID memory is reset when the live source changes, so 2-wall / 1-wall / side-switch transitions do not inherit stale integral or derivative state
 
-New IMU robustness fixes in v31
--------------------------------
+IMU robustness carried forward
+------------------------------
 - Added stillness-gated IMU reference capture so a moving chassis does not save a bad gyro bias
 - Re-zeroed relative yaw at every accepted IMU reference capture
 - Added a short IMU hold window after capture so compensation does not kick immediately while the robot is still settling
@@ -44,6 +40,14 @@ New IMU robustness fixes in v31
 - Added `IMU Sign` in the PID menu to flip the global rotational compensation direction on hardware
 - Upgraded `IMU PID Test` so it now commands a real pure-rotation correction instead of only previewing the math
 - Important note: the IMU reference is not re-anchored on every maze-heading change because heading in this sketch is a logical maze direction, not automatically a body-yaw rotation
+
+Additional fixes carried into v34
+---------------------------------
+- Restored the old highlight-only menu scroller style by removing the newer scroll arrows
+- Added remembered wall-distance smoothing for 1-wall PID:
+  - when a wall is still visible, its recent distance is blended into memory
+  - when 2-wall PID drops to 1-wall PID, the controller now follows that remembered real corridor spacing
+  - the fixed `1-wall` menu value remains only as a fallback when no recent wall memory exists
 
 LSM6DSOX tolerance model used
 -----------------------------
@@ -73,7 +77,7 @@ Architecture example
    - `u+ = vy + vx` for the FL/RR diagonal
    - `u- = vy - vx` for the FR/RL diagonal
    - `spin = [+w, -w, -w, +w]` for yaw compensation
-5. `w` is clamped only to the remaining wheel headroom, so pure left/right translation keeps its original translational pattern mathematically instead of being distorted by post-mix normalization.
+5. The final wheel commands are normalized together when needed, so translation cannot silently exceed the wheel envelope and yaw is reduced proportionally instead of being forced to zero.
 
 Yaw-only test workflow
 ----------------------
@@ -96,7 +100,8 @@ Main UI change in this version
 
 Build safety in this version
 ----------------------------
-- the inherited `test_full_v29.ino` inside the `v31` folder was wrapped with `#if 0 ... #endif` so Arduino only builds `test_full_v31.ino`
+- `test_full_v34.ino` is the active sketch in this folder
+- The copied `test_full_v33.ino` inside `test_full_v34` was disabled with `#if 0 ... #endif` so Arduino should not compile it
 
 Behavior carried forward
 ------------------------

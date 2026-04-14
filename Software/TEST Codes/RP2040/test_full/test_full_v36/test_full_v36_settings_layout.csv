@@ -11,9 +11,9 @@ Root,Main menu,Ultrasonic Test,Navigation,-,Shows live ultrasonic readings and i
 Start Settings,All runs,Route Mode,Shared,mode,Selects how the next run chooses branches: sequence right left or selection.
 Start Settings,All runs,Start Direction,Shared,direction,Sets the initial robot heading used at the beginning of a run.
 Start Settings,All runs,Turn Wait,Shared,s,Pause time after stopping at a wall and before changing heading.
-Settings,All runs,IMU On/Off,Shared,toggle,Globally enables or disables IMU use in all events tests and drive functions.
+Settings,All runs,IMU On/Off,Shared,toggle,Globally enables or disables IMU use in all events tests and drive functions; default is OFF in v34.
 Settings,All runs,Front Stop,Shared,cm,Front ultrasonic safety-stop threshold.
-Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection.
+Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection; live control now adds hysteresis around this threshold.
 Settings,All runs,Turn Detect,Shared,cm,Upper front-distance range that can still be classified as turn or junction geometry.
 Settings,All runs,Dead-End,Shared,cm,Front distance at or below which the robot can classify the path as a dead-end zone.
 Settings,All runs,Finish,Shared,cm,Front distance required before finish can be accepted when the finish-specific geometry also matches.
@@ -24,7 +24,7 @@ PID,All runs,P Gain,Shared,x,Proportional steering gain for wall-follow PID.
 PID,All runs,I Gain,Shared,x,Integral steering gain for steady-state bias correction.
 PID,All runs,D Gain,Shared,x,Derivative steering gain for damping and fast-response control.
 PID,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before the PID controller is applied.
-PID,All runs,1-wall Target,Shared,cm,Desired side distance when only one reliable wall is visible.
+PID,All runs,1-wall Target,Shared,cm,Fallback side distance only when no recent real wall memory exists; normal 1-wall PID now inherits recent measured wall spacing.
 PID,All runs,Left Output Scale,Shared,x,Extra output scale applied when the final correction command points left.
 PID,All runs,Right Output Scale,Shared,x,Extra output scale applied when the final correction command points right.
 PID,All runs,PID Test,Navigation,-,Shows the wall-following PID interpretation screen for the currently selected heading.
@@ -33,7 +33,7 @@ PID,All runs,IMU I Gain,Shared,x,Integral gain for slow yaw drift that accumulat
 PID,All runs,IMU D Gain,Shared,x,Derivative gain that damps fast rotational disturbances measured by the built-in IMU.
 PID,All runs,IMU Extra Threshold,Shared,deg,Additional angular threshold added on top of the propagated LSM6DSOX measurement uncertainty before yaw compensation reacts.
 PID,All runs,IMU Rotation Sign,Shared,sign,Flips the global IMU rotational compensation direction between +1 and -1 if the chassis turns the wrong way.
-PID,All runs,IMU PID Test,Navigation,-,Runs a pure-rotation IMU recovery test; short press stores the current body frame as the new initial coordinates.
+PID,All runs,IMU PID Test,Navigation,-,Runs a pure-rotation IMU recovery test; short press captures the current pose and arms the live recovery loop.
 IR Test,All runs,Check Gap,Shared,s,Same global event-verification gap used by execution and event tests.
 IR Test,All runs,Match N,Shared,count,Same global number of identical repeated events required for confirmation.
 IR Test,All runs,IR Stable,Shared,s,Same global IR stabilization time used before new IR states are trusted.
@@ -50,3 +50,31 @@ Event Config,Turn-capable tests,Turn Wait,Shared,s,Shared wait time before chang
 Event Config,All event tests,Check Gap,Shared,s,Shared time between repeated identical event checks.
 Event Config,All event tests,Match N,Shared,count,Shared number of identical repeated events required before confirmation.
 Event Config,All event tests,IR Stable,Shared,s,Shared IR stabilization time used before event checks trust IR data.
+
+Section,Value,Notes
+Motor Input Analysis,TwoWall ultrasonic PID,Actual post-inversion motor commands from the live v34/v35 mixer path
+Heading,North,Uses driveRobotFrame with vx=lateral and vy=forward
+Base Speed,0.35,Current default forward speed used for this comparison
+Rotation,0.00,IMU rotation intentionally excluded so the table isolates ultrasonic PID only
+P Gain,0.07,Current default wall P gain
+I Gain,0.00,Current default wall I gain
+D Gain,0.00,Current default wall D gain
+Curve b,1.00,Current default shaping factor
+Left Output Scale,1.00,Current default directional output scale
+Right Output Scale,1.00,Current default directional output scale
+Left Drive Scale,1.00,Current default drive calibration scale
+Right Drive Scale,1.00,Current default drive calibration scale
+Normalization,Not triggered,All rows stay within the wheel envelope for this selected range
+
+Left_cm,Right_cm,Diff_R_minus_L_cm,Lateral_PID_Output,FL_cmd,FR_cmd,RR_cmd,RL_cmd,FL_us,FR_us,RR_us,RL_us,FL_bar,FR_bar,RR_bar,RL_bar
+10.00,2.00,-8.00,-0.560,-0.210,-0.910,0.210,0.910,1395,1045,1605,1955,<<|,<<<<<<<<<|,|>>,|>>>>>>>>>
+9.00,3.00,-6.00,-0.420,-0.070,-0.770,0.070,0.770,1465,1115,1535,1885,<|,<<<<<<<<|,|>,|>>>>>>>>
+8.00,4.00,-4.00,-0.280,0.070,-0.630,-0.070,0.630,1535,1185,1465,1815,|>,<<<<<<|,<|,|>>>>>>
+7.00,5.00,-2.00,-0.140,0.210,-0.490,-0.210,0.490,1605,1255,1395,1745,|>>,<<<<<|,<<|,|>>>>>
+6.50,5.50,-1.00,-0.070,0.280,-0.420,-0.280,0.420,1640,1290,1360,1710,|>>>,<<<<|,<<<|,|>>>>
+6.00,6.00,0.00,0.000,0.350,-0.350,-0.350,0.350,1675,1325,1325,1675,|>>>>,<<<<|,<<<<|,|>>>>
+5.50,6.50,1.00,0.070,0.420,-0.280,-0.420,0.280,1710,1360,1290,1640,|>>>>,<<<|,<<<<|,|>>>
+5.00,7.00,2.00,0.140,0.490,-0.210,-0.490,0.210,1745,1395,1255,1605,|>>>>>,<<|,<<<<<|,|>>
+4.00,8.00,4.00,0.280,0.630,-0.070,-0.630,0.070,1815,1465,1185,1535,|>>>>>>,<|,<<<<<<|,|>
+3.00,9.00,6.00,0.420,0.770,0.070,-0.770,-0.070,1885,1535,1115,1465,|>>>>>>>>,|>,<<<<<<<<|,<|
+2.00,10.00,8.00,0.560,0.910,0.210,-0.910,-0.210,1955,1605,1045,1395,|>>>>>>>>>,|>>,<<<<<<<<<|,<<|
