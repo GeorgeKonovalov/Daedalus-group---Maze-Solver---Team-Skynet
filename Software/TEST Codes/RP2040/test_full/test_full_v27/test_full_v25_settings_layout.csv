@@ -1,0 +1,60 @@
+Menu,Shown In,Display Name,Scope,Unit,Description
+Root,Main menu,Start,Action,-,Begins the real execution attempt using the current shared settings.
+Root,Main menu,Start Settings,Navigation,-,Opens route mode and start-direction settings.
+Root,Main menu,Settings,Navigation,-,Opens shared runtime thresholds and control settings.
+Root,Main menu,Event Test,Navigation,-,Opens event-specific test selection and configuration.
+Root,Main menu,Execution State,Navigation,-,Opens the digital twin / execution-state monitoring screen.
+Root,Main menu,IR Test,Navigation,-,Shows live IR state and shared IR-related thresholds.
+Root,Main menu,Ultrasonic Test,Navigation,-,Shows live ultrasonic readings and interpreted differences.
+Start Settings,All runs,Route Mode,Shared,mode,Selects how the next run chooses branches: sequence, right, left, or selection.
+Start Settings,All runs,Start Direction,Shared,direction,Sets the initial robot heading used at the beginning of a run.
+Start Settings,All runs,Turn Wait,Shared,s,Pause time after stopping at a wall and before changing heading.
+Settings,All runs,PID,Navigation,-,Opens the PID tuning submenu.
+Settings,All runs,Motor Tune,Navigation,-,Opens manual motion tuning for checking basic robot movement.
+Settings,All runs,Front Stop,Shared,cm,Front ultrasonic safety-stop threshold. If front distance gets this low, the robot enters SafetyStop.
+Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection and wall-aware motion.
+Settings,All runs,Turn Detect,Shared,cm,Upper front-distance range that can still be classified as turn or junction geometry.
+Settings,All runs,Dead-End,Shared,cm,Front distance at or below which the robot can classify the path as a dead-end zone.
+Settings,All runs,Finish,Shared,cm,Front distance required before finish can be accepted when the finish-specific geometry also matches.
+Settings,All runs,Check Gap,Shared,s,Time between repeated identical event checks during confirmation.
+Settings,All runs,Match N,Shared,count,Number of identical event observations required in a row before the event is accepted.
+Settings,All runs,IR Stable,Shared,s,How long the IR mask must stay unchanged before the code accepts the IR state as stable.
+PID,All runs,P Gain,Shared,x,Proportional steering gain for wall-follow PID.
+PID,All runs,I Gain,Shared,x,Integral steering gain for steady-state bias correction.
+PID,All runs,D Gain,Shared,x,Derivative steering gain for damping and fast-response control.
+PID,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before the PID controller is applied.
+PID,All runs,1-wall Target,Shared,cm,Desired side distance when only one reliable wall is visible.
+PID,All runs,Left Output Scale,Shared,x,Extra output scale applied when the final correction command points left.
+PID,All runs,Right Output Scale,Shared,x,Extra output scale applied when the final correction command points right.
+PID,All runs,PID Test,Navigation,-,Shows live PID source, raw error, and shaped error for the selected heading.
+Motor Tune,All runs,Stop / North / East / South / West,Shared,mode,Runs a constant manual movement command for quick drivetrain checking.
+IR Test,All runs,NW RL / NE RR / SW FL / SE FR,Live readout,0-1,Shows the live IR state with 1 meaning triggered and 0 meaning clear.
+IR Test,All runs,Check Gap,Shared,s,Same global event-verification gap used by execution and event tests.
+IR Test,All runs,Match N,Shared,count,Same global number of identical repeated events required for confirmation.
+IR Test,All runs,IR Stable,Shared,s,Same global IR stabilization time used before new IR states are trusted.
+IR Test,All runs,Dead-End,Shared,cm,Shared dead-end distance threshold used during event determination.
+IR Test,All runs,Finish,Shared,cm,Shared finish distance threshold used during event determination.
+Ultrasonic Test,All runs,Front / Right / Back / Left,Live readout,cm,Shows averaged ultrasonic distances in the original screen-style layout.
+Ultrasonic Test,All runs,FB / LR,Live readout,cm,Shows front-back and left-right difference values from the live ultrasonic averages.
+Event Test Menu,Event tests,Corridor,Test case,-,Runs corridor behavior only.
+Event Test Menu,Event tests,T-Junction,Test case,-,Runs the forced T-junction handler path.
+Event Test Menu,Event tests,Dead-end,Test case,-,Runs the dead-end handler path.
+Event Test Menu,Event tests,Auto Start,Test case,-,Runs the synthetic start phase until corridor is confirmed.
+Event Test Menu,Event tests,Finish,Test case,-,Runs until finish is confirmed and then stops.
+Event Test Menu,Event tests,Left Turn,Test case,-,Runs the left-turn handler path.
+Event Test Menu,Event tests,Right Turn,Test case,-,Runs the right-turn handler path.
+Event Test Menu,Event tests,T-Jct Straight,Test case,-,Runs the straight-through T-junction handler path.
+Event Test Menu,Event tests,Random,Test case,-,Accepts whichever valid event is actually confirmed.
+Event Config,All event tests,Heading,Per test,direction,Sets the initial heading used before this event test starts.
+Event Config,T-Junction only,T-Choice,Per test,left-right,Selects which branch to take when the forced test case is a T-junction.
+Event Config,Turn / T-junction tests,Front Stop,Shared,cm,Shared front stop threshold used when the handler approaches the wall before stopping.
+Event Config,All event tests,Wall Threshold,Shared,cm,Shared wall-detection threshold used for continuous PID source selection.
+Event Config,Turn-capable tests,Turn Detect,Shared,cm,Shared upper front range that still counts as turn geometry.
+Event Config,All event tests,Dead-End,Shared,cm,Shared dead-end threshold used by the classifier.
+Event Config,Finish-capable tests,Finish,Shared,cm,Shared finish threshold used by the classifier.
+Event Config,Turn / T-junction tests,Turn Wait,Shared,s,Shared wait time before changing heading after the stop stage.
+Event Config,All event tests,Check Gap,Shared,s,Shared time between repeated identical event checks.
+Event Config,All event tests,Match N,Shared,count,Shared number of identical repeated events required before confirmation.
+Event Config,All event tests,IR Stable,Shared,s,Shared IR stabilization time used before event checks trust IR data.
+Event Config,All event tests,Run This Test,Action,-,Starts the selected event test using the renewed logic and shared thresholds.
+Execution State,Monitoring only,Digital Twin,Live view,-,Shows the identified event, rotated robot sensor mapping, and live ultrasonic state without driving the motors.

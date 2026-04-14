@@ -1,0 +1,50 @@
+Menu,Shown In,Display Name,Scope,Unit,Description
+Root,Main menu,Start,Action,-,Begins the real execution attempt using the current shared settings.
+Root,Main menu,Start Settings,Navigation,-,Opens route mode and start-direction settings.
+Root,Main menu,Settings,Navigation,-,Opens shared runtime thresholds and control settings.
+Root,Main menu,Event Test,Navigation,-,Opens event-specific test selection and configuration.
+Root,Main menu,IMU Test,Navigation,-,Shows live accelerometer and gyroscope data from the built-in Nano RP2040 Connect IMU together with yaw and bias status.
+Root,Main menu,Yaw Test,Navigation,deg,Shows only the relative yaw angle; short press stores the current heading as the new zero/reference.
+Root,Main menu,Execution State,Navigation,-,Opens the digital twin / execution-state monitoring screen.
+Root,Main menu,IR Test,Navigation,-,Shows live IR state and shared IR-related thresholds.
+Root,Main menu,Ultrasonic Test,Navigation,-,Shows live ultrasonic readings and interpreted differences.
+Start Settings,All runs,Route Mode,Shared,mode,Selects how the next run chooses branches: sequence right left or selection.
+Start Settings,All runs,Start Direction,Shared,direction,Sets the initial robot heading used at the beginning of a run.
+Start Settings,All runs,Turn Wait,Shared,s,Pause time after stopping at a wall and before changing heading.
+Settings,All runs,Front Stop,Shared,cm,Front ultrasonic safety-stop threshold.
+Settings,All runs,Wall Threshold,Shared,cm,Maximum side distance that still counts as a wall for PID source selection.
+Settings,All runs,Turn Detect,Shared,cm,Upper front-distance range that can still be classified as turn or junction geometry.
+Settings,All runs,Dead-End,Shared,cm,Front distance at or below which the robot can classify the path as a dead-end zone.
+Settings,All runs,Finish,Shared,cm,Front distance required before finish can be accepted when the finish-specific geometry also matches.
+Settings,All runs,Check Gap,Shared,s,Time between repeated identical event checks during confirmation.
+Settings,All runs,Match N,Shared,count,Number of identical event observations required in a row before the event is accepted.
+Settings,All runs,IR Stable,Shared,s,How long the IR mask must stay unchanged before the code accepts the IR state as stable.
+PID,All runs,P Gain,Shared,x,Proportional steering gain for wall-follow PID.
+PID,All runs,I Gain,Shared,x,Integral steering gain for steady-state bias correction.
+PID,All runs,D Gain,Shared,x,Derivative steering gain for damping and fast-response control.
+PID,All runs,Curve b,Shared,x,Shapes small wall-error magnitudes before the PID controller is applied.
+PID,All runs,1-wall Target,Shared,cm,Desired side distance when only one reliable wall is visible.
+PID,All runs,Left Output Scale,Shared,x,Extra output scale applied when the final correction command points left.
+PID,All runs,Right Output Scale,Shared,x,Extra output scale applied when the final correction command points right.
+PID,All runs,PID Test,Navigation,-,Shows the wall-following PID interpretation screen for the currently selected heading.
+PID,All runs,IMU P Gain,Shared,x,Proportional gain for yaw-hold rotational compensation based on the angle between the saved and current IMU coordinate frames.
+PID,All runs,IMU I Gain,Shared,x,Integral gain for slow yaw drift that accumulates beyond the tolerance-based IMU deadband.
+PID,All runs,IMU D Gain,Shared,x,Derivative gain that damps fast rotational disturbances measured by the built-in IMU.
+PID,All runs,IMU Extra Threshold,Shared,deg,Additional angular threshold added on top of the propagated LSM6DSOX measurement uncertainty before yaw compensation reacts.
+PID,All runs,IMU PID Test,Navigation,-,Shows saved and live IMU x-axis vectors, the computed yaw error deadband and rotational command; short press stores the current body frame as the new initial coordinates.
+IR Test,All runs,Check Gap,Shared,s,Same global event-verification gap used by execution and event tests.
+IR Test,All runs,Match N,Shared,count,Same global number of identical repeated events required for confirmation.
+IR Test,All runs,IR Stable,Shared,s,Same global IR stabilization time used before new IR states are trusted.
+IR Test,All runs,Dead-End,Shared,cm,Shared dead-end distance threshold used during event determination.
+IR Test,All runs,Finish,Shared,cm,Shared finish distance threshold used during event determination.
+Event Config,All event tests,Heading,Per test,direction,Sets the initial heading used before this event test starts.
+Event Config,T-Junction only,T-Choice,Per test,left-right,Selects which branch to take when the forced test case is a T-junction.
+Event Config,Turn-capable tests,Front Stop,Shared,cm,Shared front stop threshold used when the handler approaches the wall before stopping.
+Event Config,All event tests,Wall Threshold,Shared,cm,Shared wall-detection threshold used for continuous PID source selection.
+Event Config,Turn-capable tests,Turn Detect,Shared,cm,Shared upper front range that still counts as turn geometry.
+Event Config,All event tests,Dead-End,Shared,cm,Shared dead-end threshold used by the classifier.
+Event Config,Finish-capable tests,Finish,Shared,cm,Shared finish threshold used by the classifier.
+Event Config,Turn-capable tests,Turn Wait,Shared,s,Shared wait time before changing heading after the stop stage.
+Event Config,All event tests,Check Gap,Shared,s,Shared time between repeated identical event checks.
+Event Config,All event tests,Match N,Shared,count,Shared number of identical repeated events required before confirmation.
+Event Config,All event tests,IR Stable,Shared,s,Shared IR stabilization time used before event checks trust IR data.

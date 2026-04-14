@@ -1,0 +1,44 @@
+test_full_v26 summary
+=====================
+
+Base
+----
+- Created as a new version from test_full_v25.ino
+- Keeps the renewed corridor-only event verification logic and the restored menu/subtest layout
+
+Updated files
+-------------
+- test_full_v26.ino
+- test_full_v26_summary.txt
+- test_full_v26_settings_layout.csv
+
+Main fix in this version
+------------------------
+- Moved `EventConfigField` into the main type section near the other enums.
+- This fixes the Arduino auto-prototype problem where functions using `EventConfigField` were effectively seen before the enum existed.
+- The old copied `test_full_v25.ino` in the `v26` folder was wrapped with `#if 0 ... #endif` so Arduino ignores it and only builds `test_full_v26.ino`.
+
+Behavior carried forward
+------------------------
+- Shared event verification settings:
+  - Check gap [s]
+  - Match N [count]
+- Corridor-only event confirmation
+- Continuous PID source selection while moving
+- Cyclic heading/sensor remapping using N/E/S/W index rotation
+- Restored menu structure with:
+  - Root
+  - Start Settings
+  - Settings
+  - PID
+  - PID Test
+  - Motor Tune
+  - Event Test
+  - Execution State
+  - IR Test
+  - Ultrasonic Test
+
+Verification status
+-------------------
+- Source-level fix only
+- arduino-cli is not installed in this workspace, so no board compile was run here

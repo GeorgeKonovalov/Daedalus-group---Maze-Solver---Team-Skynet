@@ -1,0 +1,87 @@
+test_full_v25 summary
+=====================
+
+Base
+----
+- Created as a new version from test_full_v24.ino
+- Keeps the previous menu structure and subtests, but uses the renewed confirmation/execution logic
+
+Updated files
+-------------
+- test_full_v25.ino
+- test_full_v25_summary.txt
+- test_full_v25_settings_layout.csv
+
+Main runtime changes
+--------------------
+1. Shared event verification settings were added and surfaced across the menu:
+   - Check gap [s]
+   - Match N [count]
+   These are now available in:
+   - Settings
+   - IR Test
+   - Event Config
+
+2. Corridor-only event verification is preserved and made explicit:
+   - new events are checked only while the active execution state is Corridor
+   - the same candidate event must repeat Match N times
+   - checks are separated by Check gap time
+   - once confirmed, the event handler owns execution until corridor is confirmed again
+
+3. Event handlers keep selecting PID source continuously while moving:
+   - 2-wall PID
+   - 1-wall PID left
+   - 1-wall PID right
+   - no PID when no reliable wall is present
+
+4. Sensor remapping after heading changes now follows cyclic index logic:
+   - headings rotate in [N, E, S, W]
+   - clockwise turn = +1
+   - counterclockwise turn = -1
+   - relative robot IR/ultrasonic views are rebuilt from the rotated heading index
+
+5. Event Test uses the renewed execution logic:
+   - StartSeek
+   - Corridor
+   - ApproachWall
+   - WaitTurn
+   - AcquireCorridor
+   - SafetyStop
+   and uses the same repeated-confirmation behavior as the real execution path
+
+6. Previous-style menu flow was restored around the newer architecture:
+   - Root
+   - Start Settings
+   - Settings
+   - PID
+   - PID Test
+   - Motor Tune
+   - Event Test
+   - Execution State
+   - IR Test
+   - Ultrasonic Test
+   - Start Confirmation
+
+Robustness choices
+------------------
+- IR changes still use hardware interrupts to mark that the IR state changed
+- repeated event verification uses non-blocking software timing instead of a hardware timer interrupt
+  This was kept intentionally because it is simpler and more robust inside the shared menu/runtime architecture.
+- fixed-size UART buffer instead of String accumulation
+- rolling ultrasonic average
+- stale ultrasonic timeout
+- stable IR mask timing filter
+- shared confirmation helpers for events and corridor return
+- real execution ignores button input while running
+- event test and motor tune now execute live from the main loop instead of being only static screens
+
+Important logic notes
+---------------------
+- Start is still synthetic only and is never triggered from sensors
+- Finish remains the exception: it stops instead of returning to corridor
+- The digital twin / Execution State remains a live monitoring screen and does not drive the motors
+
+Verification status
+-------------------
+- Source-level integration pass completed
+- arduino-cli is not installed in this workspace, so no board compile was performed here
