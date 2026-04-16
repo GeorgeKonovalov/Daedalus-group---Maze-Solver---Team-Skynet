@@ -14,7 +14,7 @@ Start Settings,All runs,Turn Wait,Shared,s,00.00,5.00,Pause time after stopping 
 Settings,All runs,PID,Navigation,-,-,-,Opens the wall-PID menu.
 Settings,All runs,Motor Tune,Navigation,-,-,-,Opens the motor-tuning and speed-scaling menu.
 Settings,All runs,IMU On/Off,Shared,toggle,ON/OFF,OFF,Globally enables or disables IMU usage everywhere.
-Settings,All runs,Global Speed,Shared,scale,0.00,1.00,Scales all motor outputs equally in the final wheel-output path.
+Settings,All runs,Global Speed,Shared,scale,0.00,1.00,Scales base travel speed without shrinking PID or IMU correction authority.
 Settings,All runs,Front Stop,Shared,cm,00.00,4.00,Front safety stop threshold.
 Settings,All runs,Wall Threshold,Shared,cm,00.00,6.00,Side-wall threshold used for PID source selection.
 Settings,All runs,Turn Detect,Shared,cm,00.00,26.00,Upper front range that still counts as turn/junction geometry.
@@ -44,7 +44,7 @@ Motor Tune,All runs,North,Action,-,-,-,Runs the north travel-direction tune acti
 Motor Tune,All runs,East,Action,-,-,-,Runs the east travel-direction tune action.
 Motor Tune,All runs,South,Action,-,-,-,Runs the south travel-direction tune action.
 Motor Tune,All runs,West,Action,-,-,-,Runs the west travel-direction tune action.
-Motor Tune,All runs,Global Speed,Shared,scale,0.00,1.00,Scales all wheel outputs equally.
+Motor Tune,All runs,Global Speed,Shared,scale,0.00,1.00,Scales base travel speed without shrinking PID or IMU correction authority.
 Motor Tune,All runs,Travel Speed,Shared,scale,0.00,0.35,Forward corridor speed used by the runtime.
 Motor Tune,All runs,Approach Speed,Shared,scale,0.00,0.28,Reduced speed used when seeking or reacquiring a corridor.
 Motor Tune,All runs,Left Drive,Shared,scale,0.00,1.00,Left-side drive calibration multiplier.
@@ -55,7 +55,7 @@ IR Test,All runs,Dead-End,Shared,cm,00.00,16.00,Shared dead-end threshold.
 IR Test,All runs,Finish,Shared,cm,00.00,30.00,Shared finish threshold.
 Event Config,All event tests,Heading,Per test,direction,enum,North,Heading used before the selected event test starts.
 Event Config,T-Junction only,Turn Choice,Per test,left-right,enum,Left,Branch choice for the forced T-junction test.
-Event Config,All event tests,Global Speed,Shared,scale,0.00,1.00,Shared final wheel-output scale used during event tests.
+Event Config,All event tests,Global Speed,Shared,scale,0.00,1.00,Shared base-travel scale used during event tests without weakening correction.
 Event Config,Turn-capable tests,Front Stop,Shared,cm,00.00,4.00,Shared front stop threshold used before the stop stage.
 Event Config,All event tests,Wall Threshold,Shared,cm,00.00,6.00,Shared side-wall threshold for PID source selection.
 Event Config,Turn-capable tests,Turn Detect,Shared,cm,00.00,26.00,Shared upper front range that still means turn geometry.

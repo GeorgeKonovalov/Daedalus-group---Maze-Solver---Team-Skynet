@@ -1963,6 +1963,73 @@ static void normalizeWheelEnvelope(float& fl, float& fr, float& rr, float& rl) {
   }
 }
 
+static float clampTowardZero(float candidate, float baseCmd) {
+  if (baseCmd > 0.0f) {
+    return clampFloat(candidate, 0.0f, baseCmd);
+  }
+  if (baseCmd < 0.0f) {
+    return clampFloat(candidate, baseCmd, 0.0f);
+  }
+  return candidate;
+}
+
+/*
+  Limited base-motion mixer
+  -------------------------
+  Base translation comes from the commanded travel direction only and is scaled
+  by the global speed factor. Lateral/rotational compensation is then allowed
+  to reduce that base motion toward zero, but not reverse it while the robot is
+  already translating. Pure rotation is still allowed whenever the base command
+  for a wheel is zero, which keeps the isolated IMU PID test working.
+*/
+static void driveBodyFrameLimited(float baseVx, float baseVy,
+                                  float compVx, float compVy,
+                                  float w) {
+  float basePlus = baseVy + baseVx;
+  float baseMinus = baseVy - baseVx;
+  w = clampUnit(w);
+
+  float baseTranslationMax =
+    max(fabsf(basePlus) * gCfg.leftDriveScale,
+        fabsf(baseMinus) * gCfg.rightDriveScale);
+  if (baseTranslationMax > 1.0f) {
+    float baseScale = 1.0f / baseTranslationMax;
+    basePlus *= baseScale;
+    baseMinus *= baseScale;
+  }
+
+  basePlus *= gCfg.overallSpeedScale;
+  baseMinus *= gCfg.overallSpeedScale;
+
+  float compPlus = compVy + compVx;
+  float compMinus = compVy - compVx;
+
+  float pairPlus = clampTowardZero(basePlus + compPlus, basePlus);
+  float pairMinus = clampTowardZero(baseMinus + compMinus, baseMinus);
+
+  float flBase = pairPlus * gCfg.leftDriveScale;
+  float rrBase = pairPlus * gCfg.leftDriveScale;
+  float frBase = pairMinus * gCfg.rightDriveScale;
+  float rlBase = pairMinus * gCfg.rightDriveScale;
+
+  float fl = flBase + w * gCfg.leftDriveScale;
+  float rr = rrBase - w * gCfg.leftDriveScale;
+  float fr = frBase - w * gCfg.rightDriveScale;
+  float rl = rlBase + w * gCfg.rightDriveScale;
+
+  if (fabsf(flBase) > 0.0001f) fl = clampTowardZero(fl, flBase);
+  if (fabsf(rrBase) > 0.0001f) rr = clampTowardZero(rr, rrBase);
+  if (fabsf(frBase) > 0.0001f) fr = clampTowardZero(fr, frBase);
+  if (fabsf(rlBase) > 0.0001f) rl = clampTowardZero(rl, rlBase);
+
+  normalizeWheelEnvelope(fl, fr, rr, rl);
+
+  writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, fl);
+  writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, fr);
+  writeServoCommand(servoRR, STOP_RR, RANGE_RR, INV_RR, rr);
+  writeServoCommand(servoRL, STOP_RL, RANGE_RL, INV_RL, rl);
+}
+
 /*
   45 degree omni X-drive layout
   -----------------------------
@@ -2004,11 +2071,6 @@ static void driveBodyFrame(float vx, float vy, float w) {
 
   normalizeWheelEnvelope(fl, fr, rr, rl);
 
-  fl *= gCfg.overallSpeedScale;
-  fr *= gCfg.overallSpeedScale;
-  rr *= gCfg.overallSpeedScale;
-  rl *= gCfg.overallSpeedScale;
-
   writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, fl);
   writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, fr);
   writeServoCommand(servoRR, STOP_RR, RANGE_RR, INV_RR, rr);
@@ -2016,29 +2078,31 @@ static void driveBodyFrame(float vx, float vy, float w) {
 }
 
 void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Heading heading) {
-  float vx = 0.0f;
-  float vy = 0.0f;
+  float baseVx = 0.0f;
+  float baseVy = 0.0f;
+  float compVx = 0.0f;
+  float compVy = 0.0f;
 
   switch (heading) {
     case Heading::North:
-      vx = lateralCmd;
-      vy = forwardCmd;
+      baseVy = forwardCmd;
+      compVx = lateralCmd;
       break;
     case Heading::East:
-      vx = forwardCmd;
-      vy = -lateralCmd;
+      baseVx = forwardCmd;
+      compVy = -lateralCmd;
       break;
     case Heading::South:
-      vx = -lateralCmd;
-      vy = -forwardCmd;
+      baseVy = -forwardCmd;
+      compVx = -lateralCmd;
       break;
     case Heading::West:
-      vx = -forwardCmd;
-      vy = lateralCmd;
+      baseVx = -forwardCmd;
+      compVy = lateralCmd;
       break;
   }
 
-  driveBodyFrame(vx, vy, rotationCmd);
+  driveBodyFrameLimited(baseVx, baseVy, compVx, compVy, rotationCmd);
 }
 
 /*
@@ -2502,7 +2566,7 @@ void handleSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
       workingSettings.imuEnabled = workingSettings.imuEnabled ? 0 : 1;
       commitRuntimeConfig();
       break;
-    case 3: openDigitEditor("Global spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100, "Scales all motor", "outputs equally", Screen::Settings, 1, 2); break;
+    case 3: openDigitEditor("Overall spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100, "Scales base travel", "keeps correction full", Screen::Settings, 1, 2); break;
     case 4: openDigitEditor("Front stop", "cm", &workingSettings.frontStopDistance_x100, 0, 9999, "Emergency stop if", "front gets too close", Screen::Settings, 2, 2); break;
     case 5: openDigitEditor("Wall thr", "cm", &workingSettings.corridorWallThreshold_x100, 0, 9999, "Wall limit for PID", "and finish detection", Screen::Settings, 2, 2); break;
     case 6: openDigitEditor("Turn detect", "cm", &workingSettings.turnDetectDistance_x100, 0, 9999, "Upper front range", "that still means turn", Screen::Settings, 2, 2); break;
@@ -2637,8 +2701,8 @@ void handleMotorTuneInput(int encoderDelta, ButtonEvent buttonEvent) {
         gTuneMotion = (TuneMotion)gMotorTuneIndex;
         break;
       case 5:
-        openDigitEditor("Global spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100,
-                        "Scales all motor", "outputs equally", Screen::MotorTune, 1, 2);
+        openDigitEditor("Overall spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100,
+                        "Scales base travel", "keeps correction full", Screen::MotorTune, 1, 2);
         break;
       case 6:
         openDigitEditor("Travel spd", "x", &workingSettings.baseSpeed_x100, 0, 100,
@@ -2738,7 +2802,7 @@ static const char* eventConfigDesc1(EventConfigField field) {
   switch (field) {
     case EventConfigField::Heading: return "Robot heading for";
     case EventConfigField::TurnChoice: return "Branch used for";
-    case EventConfigField::OverallSpeed: return "Scales all wheel";
+    case EventConfigField::OverallSpeed: return "Scales base travel";
     case EventConfigField::FrontStop: return "Front distance to";
     case EventConfigField::WallThreshold: return "Wall presence limit";
     case EventConfigField::TurnDetect: return "Upper front range";
@@ -2771,7 +2835,7 @@ static const char* eventConfigDesc2(EventConfigField field) {
   switch (field) {
     case EventConfigField::Heading: return "this test case.";
     case EventConfigField::TurnChoice: return "T-junction test.";
-    case EventConfigField::OverallSpeed: return "outputs equally.";
+    case EventConfigField::OverallSpeed: return "not correction.";
     case EventConfigField::FrontStop: return "enter stop stage.";
     case EventConfigField::WallThreshold: return "for PID selection.";
     case EventConfigField::TurnDetect: return "that still means turn.";
@@ -2859,7 +2923,7 @@ void handleEventTestConfigInput(int encoderDelta, ButtonEvent buttonEvent) {
       currentEventTestConfig().turnChoice = (currentEventTestConfig().turnChoice == TurnChoice::Left) ? TurnChoice::Right : TurnChoice::Left;
       break;
     case EventConfigField::OverallSpeed:
-      openDigitEditor("Global spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100, eventConfigDesc1(EventConfigField::OverallSpeed), eventConfigDesc2(EventConfigField::OverallSpeed), Screen::EventTestConfig, 1, 2);
+      openDigitEditor("Overall spd", "x", &workingSettings.overallSpeedScale_x100, 0, 100, eventConfigDesc1(EventConfigField::OverallSpeed), eventConfigDesc2(EventConfigField::OverallSpeed), Screen::EventTestConfig, 1, 2);
       break;
     case EventConfigField::FrontStop:
       openDigitEditor("Front stop", "cm", &workingSettings.frontStopDistance_x100, 0, 9999, eventConfigDesc1(EventConfigField::FrontStop), eventConfigDesc2(EventConfigField::FrontStop), Screen::EventTestConfig, 2, 2);
@@ -3239,7 +3303,7 @@ void drawSettingsScreen() {
   snprintf(items[2], sizeof(items[2]), "IMU:%s", activeSettings.imuEnabled ? "ON" : "OFF");
   char value[16];
   formatCompactValue(value, sizeof(value), activeSettings.overallSpeedScale_x100, 2);
-  snprintf(items[3], sizeof(items[3]), "Global:%s", value);
+  snprintf(items[3], sizeof(items[3]), "Overall:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.frontStopDistance_x100, 2);
   snprintf(items[4], sizeof(items[4]), "FrontStop:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.corridorWallThreshold_x100, 2);
@@ -3449,7 +3513,7 @@ void drawMotorTuneScreen() {
   snprintf(items[3], sizeof(items[3]), "South");
   snprintf(items[4], sizeof(items[4]), "West");
   formatCompactValue(value, sizeof(value), activeSettings.overallSpeedScale_x100, 2);
-  snprintf(items[5], sizeof(items[5]), "Global:%s", value);
+  snprintf(items[5], sizeof(items[5]), "Overall:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.baseSpeed_x100, 2);
   snprintf(items[6], sizeof(items[6]), "Travel:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.approachSpeed_x100, 2);
@@ -3627,7 +3691,7 @@ static void eventConfigFieldText(EventConfigField field, char* buffer, size_t si
       break;
     case EventConfigField::OverallSpeed:
       formatCompactValue(value, sizeof(value), activeSettings.overallSpeedScale_x100, 2);
-      snprintf(buffer, size, "Global:%s", value);
+      snprintf(buffer, size, "Overall:%s", value);
       break;
     case EventConfigField::FrontStop:
       formatCompactValue(value, sizeof(value), activeSettings.frontStopDistance_x100, 2);
