@@ -32,7 +32,7 @@ const int ECHO_W = 4;
 // ===== SENSOR CONFIG =====
 const unsigned long PULSE_TIMEOUT = 20000;  // ~340 cm max range
 const float         MAX_DIST     = 30.0;    // Cap at 30 cm (maze walls)
-const int           INTER_DELAY  = 25;      // ms between sequential reads
+const int           INTER_DELAY  = 5;      // ms between sequential reads
 
 // ===== ULTRASONIC READING (same method as PID control code) =====
 float readUltrasonic(int echoPin) {
