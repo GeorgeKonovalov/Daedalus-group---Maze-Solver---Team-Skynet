@@ -1,22 +1,28 @@
 /*
-  Ultrasonic Sensor Reader — UART Sender
+  Ultrasonic Sensor Reader - UART Sender
   ----------------------------------------
   Runs on a dedicated Arduino Uno.
   Reads four HC-SR04 sensors (N/E/S/W) sequentially using a shared
   trigger pin, then sends the distances over hardware UART to the
   main robot controller.
 
-  UART format (matches uno_sender_test protocol):
+  UART format:
       D1:<north>,D2:<east>,D3:<south>,D4:<west>\n
   Values are floats with one decimal place (cm).
 
   Pin map
   -------
-  Trig (shared)  → digital 2
-  North echo     → digital 5
-  East  echo     → digital 6
-  South echo     → digital 3
-  West  echo     → digital 4
+  Trig (shared)  -> digital 2
+  North echo     -> digital 5
+  East  echo     -> digital 6
+  South echo     -> digital 3
+  West  echo     -> digital 4
+
+  v3 notes
+  --------
+  This version keeps the original simple structure and float output,
+  but updates the communication speed and restores safer shared-trigger
+  timing for reliable readings.
 */
 
 #include <Arduino.h>
@@ -30,11 +36,13 @@ const int ECHO_S = 3;
 const int ECHO_W = 4;
 
 // ===== SENSOR CONFIG =====
-const unsigned long PULSE_TIMEOUT = 3000;  // ~340 cm max range
-const float         MAX_DIST     = 30.0;    // Cap at 30 cm (maze walls)
-const int           INTER_DELAY  = 3;      // ms between sequential reads
+const unsigned long UART_BAUD        = 115200UL;
+const unsigned long PULSE_TIMEOUT    = 5000UL;  // Safe timeout for short maze distances with some margin.
+const float         MAX_DIST         = 30.0;    // Cap at 30 cm (maze walls).
+const int           INTER_DELAY      = 5;       // ms between sequential reads to reduce cross-talk.
+const int           POST_CYCLE_DELAY = 5;       // ms quiet gap before the next trigger cycle starts.
 
-// ===== ULTRASONIC READING (same method as PID control code) =====
+// ===== ULTRASONIC READING =====
 float readUltrasonic(int echoPin) {
     // Trigger pulse
     digitalWrite(TRIG_ALL, LOW);
@@ -44,13 +52,13 @@ float readUltrasonic(int echoPin) {
     digitalWrite(TRIG_ALL, LOW);
 
     // Measure echo duration
-    long duration = pulseIn(echoPin, HIGH, PULSE_TIMEOUT);
+    unsigned long duration = pulseIn(echoPin, HIGH, PULSE_TIMEOUT);
 
-    // Convert to cm  (speed of sound ≈ 0.0343 cm/µs, /2 for round trip)
-    float distance = duration * 0.0343 / 2.0;
+    // Convert to cm  (speed of sound ~= 0.0343 cm/us, /2 for round trip)
+    float distance = duration * 0.0343f / 2.0f;
 
     // Clamp: zero means timeout, anything beyond MAX_DIST is out of range
-    if (distance == 0 || distance > MAX_DIST) {
+    if (distance == 0.0f || distance > MAX_DIST) {
         distance = MAX_DIST;
     }
     return distance;
@@ -58,7 +66,7 @@ float readUltrasonic(int echoPin) {
 
 // ===== SETUP =====
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(UART_BAUD);
 
     // Trigger pin
     pinMode(TRIG_ALL, OUTPUT);
@@ -79,14 +87,16 @@ void loop() {
     // Sequential reads with inter-sensor delays to prevent cross-talk
     float distN = readUltrasonic(ECHO_N);
     delay(INTER_DELAY);
+
     float distE = readUltrasonic(ECHO_E);
     delay(INTER_DELAY);
+
     float distS = readUltrasonic(ECHO_S);
     delay(INTER_DELAY);
+
     float distW = readUltrasonic(ECHO_W);
     delay(INTER_DELAY);
-
-    //Send over UART in the agreed protocol format
+    // Send over UART in the agreed protocol format
     Serial.print("D1:");
     Serial.print(distN, 1);
     Serial.print(",D2:");
@@ -96,6 +106,8 @@ void loop() {
     Serial.print(",D4:");
     Serial.println(distW, 1);
 
-    // No extra delay needed — the four sensor reads + inter-delays
-    // already take ~60 ms, giving roughly a 16 Hz update rate
+    // At 115200 baud the packet finishes much faster than before, so keep
+    // a short quiet gap here to avoid retriggering the shared ultrasonic
+    // array too aggressively on the next loop.
+    delay(POST_CYCLE_DELAY);
 }
