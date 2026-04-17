@@ -91,7 +91,7 @@ struct RuntimeSettings {
   int imuAngleThreshold_x100 = 100;
   int imuPidTestYawError_x100 = 300;
   int curveB_x100 = 100;
-  int pidWallDistance_x100 = 600;
+  int pidWallDistance_x100 = 1600;
   int pidLeftScale_x100 = 100;
   int pidRightScale_x100 = 80;
   int overallSpeedScale_x100 = 100;
@@ -101,7 +101,7 @@ struct RuntimeSettings {
   int rightDriveScale_x100 = 100;
 
   int frontStopDistance_x100 = 400;
-  int corridorWallThreshold_x100 = 600;
+  int corridorWallThreshold_x100 = 1600;
   int turnDetectDistance_x100 = 2600;
   int deadEndDistance_x100 = 1600;
   int finishDistance_x100 = 3000;
@@ -1417,10 +1417,10 @@ static void serviceUartSensorStream() {
       if (parseDistancesLine(gUartLine, d1, d2, d3, d4)) {
         // Match the newer Uno sender contract used by uno_sensor_sender_v3:
         // D1=N, D2=E, D3=S, D4=W.
-        gDistN = d1;
-        gDistE = d2;
-        gDistS = d3;
-        gDistW = d4;
+        gDistN = d3;
+        gDistE = d4;
+        gDistS = d1;
+        gDistW = d2;
         pushUltrasonicAverages(gDistN, gDistE, gDistS, gDistW);
         gUltrasonicSampleId++;
         gUltrasonicValid = true;
