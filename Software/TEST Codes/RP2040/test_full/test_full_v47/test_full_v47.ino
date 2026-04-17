@@ -4075,10 +4075,8 @@ void drawRunScreen() {
 static bool screenUsesUiThrottle(Screen screen) {
   switch (screen) {
     case Screen::RunScreen:
-    case Screen::EventTestRun:
-    case Screen::UltrasonicSensorTest:
-    case Screen::IMUTest:
-    case Screen::IMUYawTest:
+      // Only throttle passive telemetry screens. Any screen that still accepts
+      // encoder/button input must redraw immediately so the UI never looks frozen.
       return true;
     default:
       return false;
@@ -4168,8 +4166,6 @@ void setup() {
 }
 
 void loop() {
-  refreshSensors();
-
   int32_t rawEncoderDelta = 0;
   noInterrupts();
   rawEncoderDelta = gEncoderRawDelta;
@@ -4189,6 +4185,7 @@ void loop() {
   gEncoderStepCarry = (int8_t)combinedEncoderDelta;
 
   if (gExecutive.running) {
+    refreshSensors();
     (void)readButtonEvent(false);
     updateExecutive();
     gCurrentScreen = Screen::RunScreen;
@@ -4196,12 +4193,14 @@ void loop() {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleEventTestRunInput(buttonEvent);
     if (gCurrentScreen == Screen::EventTestRun) {
+      refreshSensors();
       updateEventTestRun();
     }
   } else if (gCurrentScreen == Screen::MotorTune) {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleMotorTuneInput(encoderDelta, buttonEvent);
     if (gCurrentScreen == Screen::MotorTune) {
+      refreshSensors();
       runTuneMotion();
     } else {
       stopAll();
@@ -4210,6 +4209,7 @@ void loop() {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleImuPidTestInput(buttonEvent);
     if (gCurrentScreen == Screen::IMUPIDTest) {
+      refreshSensors();
       if (gImuPidTestArmed && imuUsageEnabled() && gImu.referenceValid) {
         // The IMU PID test intentionally isolates pure yaw recovery from the
         // maze-heading logic so only rotational compensation is being tuned here.
@@ -4230,6 +4230,9 @@ void loop() {
   } else {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleIdleUiInput(encoderDelta, buttonEvent);
+    // While the robot is idle, prioritize UI input before background sensor
+    // refresh so the menu remains responsive even if sensor work is busy.
+    refreshSensors();
   }
 
   drawUI();

@@ -78,10 +78,10 @@ constexpr uint8_t IMU_SAMPLE_POLL_DELAY_MS = 1;
 // Settings storage (fixed-point x100)
 // ======================================================
 struct RuntimeSettings {
-  int pidDeadband_x100 = 60;
-  int p_x1000 = 50;   //   
+  int pidDeadband1W_x100 = 60;
+  int p_x1000 = 800;
   int i_x1000 = 0;     //   
-  int d_x1000 = 10;    //   
+  int d_x1000 = 80;    //   
   // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
   uint8_t imuEnabled = 0;
   int imuSign_x100 = 100;
@@ -91,6 +91,9 @@ struct RuntimeSettings {
   int imuAngleThreshold_x100 = 100;
   int imuPidTestYawError_x100 = 300;
   int curveB_x100 = 100;
+  int pidTwoWallFullError_x100 = 800;
+  int pidDeadband2W_x1000 = 50;
+  int pidDFilterAlpha_x1000 = 200;
   int pidWallDistance_x100 = 1600;
   int pidLeftScale_x100 = 100;
   int pidRightScale_x100 = 80;
@@ -115,7 +118,7 @@ struct RuntimeSettings {
 };
 
 struct RuntimeConfig {
-  float pidDeadbandCm = 0.6f;
+  float pidDeadband1WCm = 0.6f;
   float p = 0.0f;
   float i = 0.0f;
   float d = 0.0f;
@@ -127,6 +130,9 @@ struct RuntimeConfig {
   float imuAngleThresholdDeg = 1.0f;
   float imuPidTestYawErrorDeg = 3.0f;
   float curveB = 1.0f;
+  float pidTwoWallFullErrorCm = 8.0f;
+  float pidDeadband2W = 0.05f;
+  float pidDFilterAlpha = 0.2f;
   float pidWallDistanceCm = 6.0f;
   float pidLeftScale = 1.0f;
   float pidRightScale = 1.0f;
@@ -323,6 +329,10 @@ enum class EventConfigField : uint8_t {
   WallD,
   CurveB,
   OneWallTarget,
+  OneWallDeadband,
+  TwoWallFullScale,
+  TwoWallDeadband,
+  DFilterAlpha,
   LeftOutput,
   RightOutput,
   ImuToggle,
@@ -601,7 +611,7 @@ void resetCorridorConfirmation();
 
 float shapedMagnitude(float magnitude);
 float shapeSignedError(float error);
-float computePid(float error);
+float computePid(float error, PidSource source);
 float computeWallError(const PerceptionFrame& frame, PidSource source);
 void resetWallReference();
 void updateWallReference(const PerceptionFrame& frame);
@@ -700,6 +710,12 @@ float applyErrorDeadband(float error, float deadband) {
   if (fabsf(error) <= deadband) return 0.0f;
   if (error > 0.0f) return error - deadband;
   return error + deadband;
+}
+
+float computeTwoWallScaledError(float leftCm, float rightCm) {
+  float fullErrorCm = max(gCfg.pidTwoWallFullErrorCm, 0.01f);
+  float scaled = (rightCm - leftCm) / fullErrorCm;
+  return clampFloat(scaled, -1.0f, 1.0f);
 }
 
 float fixedToFloat2(int value) {
@@ -802,6 +818,9 @@ void commitRuntimeConfig() {
   gCfg.imuAngleThresholdDeg = fixedToFloat2(activeSettings.imuAngleThreshold_x100);
   gCfg.imuPidTestYawErrorDeg = fixedToFloat2(activeSettings.imuPidTestYawError_x100);
   gCfg.curveB = clampFloat(fixedToFloat2(activeSettings.curveB_x100), 0.10f, 20.0f);
+  gCfg.pidTwoWallFullErrorCm = max(fixedToFloat2(activeSettings.pidTwoWallFullError_x100), 0.01f);
+  gCfg.pidDeadband2W = clampFloat(fixedToFloat3(activeSettings.pidDeadband2W_x1000), 0.0f, 1.0f);
+  gCfg.pidDFilterAlpha = clampFloat(fixedToFloat3(activeSettings.pidDFilterAlpha_x1000), 0.01f, 1.0f);
   gCfg.pidWallDistanceCm = fixedToFloat2(activeSettings.pidWallDistance_x100);
   gCfg.pidLeftScale = fixedToFloat2(activeSettings.pidLeftScale_x100);
   gCfg.pidRightScale = fixedToFloat2(activeSettings.pidRightScale_x100);
@@ -810,7 +829,7 @@ void commitRuntimeConfig() {
   gCfg.approachSpeed = clampFloat(fixedToFloat2(activeSettings.approachSpeed_x100), 0.0f, 1.0f);
   gCfg.leftDriveScale = clampFloat(fixedToFloat2(activeSettings.leftDriveScale_x100), 0.10f, 3.0f);
   gCfg.rightDriveScale = clampFloat(fixedToFloat2(activeSettings.rightDriveScale_x100), 0.10f, 3.0f);
-  gCfg.pidDeadbandCm = fixedToFloat2(activeSettings.pidDeadband_x100);
+  gCfg.pidDeadband1WCm = fixedToFloat2(activeSettings.pidDeadband1W_x100);
 
   gCfg.frontStopDistanceCm = fixedToFloat2(activeSettings.frontStopDistance_x100);
   gCfg.corridorWallThresholdCm = fixedToFloat2(activeSettings.corridorWallThreshold_x100);
@@ -1881,25 +1900,34 @@ Heading chooseHeadingForEvent(const PerceptionFrame& frame, EventType eventType,
 }
 
 // Motion control
-float shapedMagnitude(float magnitude) {
+float wallErrorInterpretLimit(PidSource source) {
+  return (source == PidSource::TwoWall) ? 1.0f : PID_INTERPRET_LIMIT_CM;
+}
+
+float shapedMagnitude(float magnitude, float interpretLimit) {
   float absMagnitude = fabsf(magnitude);
-  if (absMagnitude < PID_INTERPRET_LIMIT_CM) {
-    float ratio = absMagnitude / PID_INTERPRET_LIMIT_CM;
-    return PID_INTERPRET_LIMIT_CM * powf(ratio, gCfg.curveB);
+  float safeLimit = max(interpretLimit, 0.001f);
+  if (absMagnitude < safeLimit) {
+    float ratio = absMagnitude / safeLimit;
+    return safeLimit * powf(ratio, gCfg.curveB);
   }
   return absMagnitude;
 }
 
-float shapeSignedError(float error) {
+float shapeSignedError(float error, float interpretLimit) {
   if (error == 0.0f) return 0.0f;
   float sign = (error >= 0.0f) ? 1.0f : -1.0f;
-  return sign * shapedMagnitude(error);
+  return sign * shapedMagnitude(error, interpretLimit);
+}
+
+float shapeSignedError(float error) {
+  return shapeSignedError(error, PID_INTERPRET_LIMIT_CM);
 }
 
 float computeWallError(const PerceptionFrame& frame, PidSource source) {
   switch (source) {
     case PidSource::TwoWall:
-      return frame.right - frame.left;
+      return computeTwoWallScaledError(frame.left, frame.right);
     case PidSource::LeftWall: {
       float targetLeftCm = gWallRef.leftValid ? gWallRef.leftCm : gCfg.pidWallDistanceCm;
       return targetLeftCm - frame.left;
@@ -1914,14 +1942,15 @@ float computeWallError(const PerceptionFrame& frame, PidSource source) {
   }
 }
 
-float computePid(float error) {
+float computePid(float error, PidSource source) {
   uint32_t now = millis();
   float dt = (gPid.previousMs == 0) ? 0.01f : (now - gPid.previousMs) / 1000.0f;
   dt = clampFloat(dt, 0.01f, 0.20f);
+  if (dt < 1e-4f) dt = 1e-4f;
 
-  float shapedError = shapeSignedError(error);
+  float shapedError = shapeSignedError(error, wallErrorInterpretLimit(source));
   float derivativeRaw = (shapedError - gPid.previousError) / dt;
-  const float dAlpha = 0.2f;   // 0.1–0.3 typical
+  float dAlpha = gCfg.pidDFilterAlpha;
   gPid.derivativeFiltered += dAlpha * (derivativeRaw - gPid.derivativeFiltered);
 
   gPid.integral += shapedError * dt;
@@ -2217,11 +2246,13 @@ void followSmart(Heading heading, float forwardSpeed) {
   if (controlSource != PidSource::None) {
     float wallError = computeWallError(frame, controlSource);
 
-    // Use deadband mainly for ultrasonic-difference noise rejection.
-    // Most important for TwoWall mode, but also useful for 1-wall mode.
-    wallError = applyErrorDeadband(wallError, gCfg.pidDeadbandCm);
+    if (controlSource == PidSource::TwoWall) {
+      wallError = applyErrorDeadband(wallError, gCfg.pidDeadband2W);
+    } else {
+      wallError = applyErrorDeadband(wallError, gCfg.pidDeadband1WCm);
+    }
 
-    correction = computePid(wallError);
+    correction = computePid(wallError, controlSource);
   }
 
   float rotationComp = currentImuRotationCompensation(gImuPid);
@@ -2671,7 +2702,7 @@ void handleSettingsInput(int encoderDelta, ButtonEvent buttonEvent) {
 }
 
 void handlePidInput(int encoderDelta, ButtonEvent buttonEvent) {
-  constexpr int itemCount = 11;
+  constexpr int itemCount = 14;
   if (encoderDelta != 0) {
     gPidIndex += encoderDelta;
     if (gPidIndex < 0) gPidIndex = 0;
@@ -2690,11 +2721,15 @@ void handlePidInput(int encoderDelta, ButtonEvent buttonEvent) {
     case 2: openDigitEditor("D gain", "x", &workingSettings.d_x1000, 0, 9999, "Derivative damping", "for fast changes", Screen::PID, 1, 3); break;
     case 3: openDigitEditor("Curve b", "x", &workingSettings.curveB_x100, 1, 9999, "Shapes small errors", "before PID acts", Screen::PID, 1, 2); break;
     case 4: openDigitEditor("1-wall", "cm", &workingSettings.pidWallDistance_x100, 0, 9999, "Target distance when", "only one wall exists", Screen::PID, 2, 2); break;
-    case 5: openDigitEditor("Left out", "x", &workingSettings.pidLeftScale_x100, 10, 300, "Extra scale for", "left correction", Screen::PID, 1, 2); break;
-    case 6: openDigitEditor("Right out", "x", &workingSettings.pidRightScale_x100, 10, 300, "Extra scale for", "right correction", Screen::PID, 1, 2); break;
-    case 7: gPidTestHeading = headingFromIndex(activeSettings.startHeadingIndex); gCurrentScreen = Screen::PIDTest; break;
-    case 8: gCurrentScreen = Screen::IMUPIDMenu; break;
-    case 9: gCurrentScreen = Screen::Settings; break;
+    case 5: openDigitEditor("1W dead", "cm", &workingSettings.pidDeadband1W_x100, 0, 9999, "Deadband for single", "wall distance error", Screen::PID, 2, 2); break;
+    case 6: openDigitEditor("2W full", "cm", &workingSettings.pidTwoWallFullError_x100, 1, 9999, "Side difference that", "means full correction", Screen::PID, 2, 2); break;
+    case 7: openDigitEditor("2W dead", "x", &workingSettings.pidDeadband2W_x1000, 0, 1000, "Deadband for scaled", "two-wall error", Screen::PID, 1, 3); break;
+    case 8: openDigitEditor("D alpha", "x", &workingSettings.pidDFilterAlpha_x1000, 10, 1000, "Derivative filter", "smoothing alpha", Screen::PID, 1, 3); break;
+    case 9: openDigitEditor("Left out", "x", &workingSettings.pidLeftScale_x100, 10, 300, "Extra scale for", "left correction", Screen::PID, 1, 2); break;
+    case 10: openDigitEditor("Right out", "x", &workingSettings.pidRightScale_x100, 10, 300, "Extra scale for", "right correction", Screen::PID, 1, 2); break;
+    case 11: gPidTestHeading = headingFromIndex(activeSettings.startHeadingIndex); gCurrentScreen = Screen::PIDTest; break;
+    case 12: gCurrentScreen = Screen::IMUPIDMenu; break;
+    case 13: gCurrentScreen = Screen::Settings; break;
     default: break;
   }
 }
@@ -2835,6 +2870,10 @@ static bool eventConfigFieldRelevant(EventTestCase testCase, EventConfigField fi
     case EventConfigField::WallD:
     case EventConfigField::CurveB:
     case EventConfigField::OneWallTarget:
+    case EventConfigField::OneWallDeadband:
+    case EventConfigField::TwoWallFullScale:
+    case EventConfigField::TwoWallDeadband:
+    case EventConfigField::DFilterAlpha:
     case EventConfigField::LeftOutput:
     case EventConfigField::RightOutput:
     case EventConfigField::ImuToggle:
@@ -2907,6 +2946,10 @@ static const char* eventConfigDesc1(EventConfigField field) {
     case EventConfigField::WallD: return "Wall PID derivative";
     case EventConfigField::CurveB: return "Wall error shaping";
     case EventConfigField::OneWallTarget: return "Fallback 1-wall";
+    case EventConfigField::OneWallDeadband: return "Deadband for 1-wall";
+    case EventConfigField::TwoWallFullScale: return "Two-wall full";
+    case EventConfigField::TwoWallDeadband: return "Deadband for 2-wall";
+    case EventConfigField::DFilterAlpha: return "Derivative smoothing";
     case EventConfigField::LeftOutput: return "Left correction";
     case EventConfigField::RightOutput: return "Right correction";
     case EventConfigField::ImuToggle: return "Enable or disable";
@@ -2940,6 +2983,10 @@ static const char* eventConfigDesc2(EventConfigField field) {
     case EventConfigField::WallD: return "gain for damping.";
     case EventConfigField::CurveB: return "before PID acts.";
     case EventConfigField::OneWallTarget: return "target distance.";
+    case EventConfigField::OneWallDeadband: return "distance error.";
+    case EventConfigField::TwoWallFullScale: return "correction scale [cm].";
+    case EventConfigField::TwoWallDeadband: return "scaled error.";
+    case EventConfigField::DFilterAlpha: return "for D term.";
     case EventConfigField::LeftOutput: return "output scale.";
     case EventConfigField::RightOutput: return "output scale.";
     case EventConfigField::ImuToggle: return "IMU PID globally.";
@@ -3054,6 +3101,18 @@ void handleEventTestConfigInput(int encoderDelta, ButtonEvent buttonEvent) {
       break;
     case EventConfigField::OneWallTarget:
       openDigitEditor("1-wall", "cm", &workingSettings.pidWallDistance_x100, 0, 9999, eventConfigDesc1(EventConfigField::OneWallTarget), eventConfigDesc2(EventConfigField::OneWallTarget), Screen::EventTestConfig, 2, 2);
+      break;
+    case EventConfigField::OneWallDeadband:
+      openDigitEditor("1W dead", "cm", &workingSettings.pidDeadband1W_x100, 0, 9999, eventConfigDesc1(EventConfigField::OneWallDeadband), eventConfigDesc2(EventConfigField::OneWallDeadband), Screen::EventTestConfig, 2, 2);
+      break;
+    case EventConfigField::TwoWallFullScale:
+      openDigitEditor("2W full", "cm", &workingSettings.pidTwoWallFullError_x100, 1, 9999, eventConfigDesc1(EventConfigField::TwoWallFullScale), eventConfigDesc2(EventConfigField::TwoWallFullScale), Screen::EventTestConfig, 2, 2);
+      break;
+    case EventConfigField::TwoWallDeadband:
+      openDigitEditor("2W dead", "x", &workingSettings.pidDeadband2W_x1000, 0, 1000, eventConfigDesc1(EventConfigField::TwoWallDeadband), eventConfigDesc2(EventConfigField::TwoWallDeadband), Screen::EventTestConfig, 1, 3);
+      break;
+    case EventConfigField::DFilterAlpha:
+      openDigitEditor("D alpha", "x", &workingSettings.pidDFilterAlpha_x1000, 10, 1000, eventConfigDesc1(EventConfigField::DFilterAlpha), eventConfigDesc2(EventConfigField::DFilterAlpha), Screen::EventTestConfig, 1, 3);
       break;
     case EventConfigField::LeftOutput:
       openDigitEditor("Left out", "x", &workingSettings.pidLeftScale_x100, 10, 300, eventConfigDesc1(EventConfigField::LeftOutput), eventConfigDesc2(EventConfigField::LeftOutput), Screen::EventTestConfig, 1, 2);
@@ -3419,7 +3478,7 @@ void drawSettingsScreen() {
 
 void drawPIDScreen() {
   drawHeader("PID");
-  char items[10][28];
+  char items[14][28];
   char value[16];
   formatCompactValue(value, sizeof(value), activeSettings.p_x1000, 3);
   snprintf(items[0], sizeof(items[0]), "P:%s", value);
@@ -3431,18 +3490,24 @@ void drawPIDScreen() {
   snprintf(items[3], sizeof(items[3]), "Curve:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.pidWallDistance_x100, 2);
   snprintf(items[4], sizeof(items[4]), "1Wall:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.pidDeadband1W_x100, 2);
+  snprintf(items[5], sizeof(items[5]), "1WDead:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.pidTwoWallFullError_x100, 2);
+  snprintf(items[6], sizeof(items[6]), "2WFull:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.pidDeadband2W_x1000, 3);
+  snprintf(items[7], sizeof(items[7]), "2WDead:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.pidDFilterAlpha_x1000, 3);
+  snprintf(items[8], sizeof(items[8]), "DAlpha:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.pidLeftScale_x100, 2);
-  snprintf(items[5], sizeof(items[5]), "LeftOut:%s", value);
+  snprintf(items[9], sizeof(items[9]), "LeftOut:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.pidRightScale_x100, 2);
-  snprintf(items[6], sizeof(items[6]), "RightOut:%s", value);
-  formatCompactValue(value, sizeof(value), activeSettings.pidDeadband_x100, 2);
-  snprintf(items[7], sizeof(items[7]), "Deadband:%s", value);
-  snprintf(items[8], sizeof(items[8]), "PID Test");
-  snprintf(items[9], sizeof(items[9]), "IMU PID");
-  snprintf(items[10], sizeof(items[10]), "Back");
-  const char* ptrs[10];
-  for (int i = 0; i < 10; ++i) ptrs[i] = items[i];
-  drawScrollableItemList(ptrs, 10, gPidIndex, 26);
+  snprintf(items[10], sizeof(items[10]), "RightOut:%s", value);
+  snprintf(items[11], sizeof(items[11]), "PID Test");
+  snprintf(items[12], sizeof(items[12]), "IMU PID");
+  snprintf(items[13], sizeof(items[13]), "Back");
+  const char* ptrs[14];
+  for (int i = 0; i < 14; ++i) ptrs[i] = items[i];
+  drawScrollableItemList(ptrs, 14, gPidIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Long: settings");
 }
@@ -3478,7 +3543,7 @@ void drawPIDTestScreen() {
   updateWallReference(frame);
   PidSource displaySource = stabilizedPidSource(frame, frame.pidSource);
   float rawError = computeWallError(frame, displaySource);
-  float shaped = shapeSignedError(rawError);
+  float shaped = shapeSignedError(rawError, wallErrorInterpretLimit(displaySource));
   u8g2.setFont(u8g2_font_5x7_tf);
   char line[32];
   snprintf(line, sizeof(line), "Dir:%s Src:%s", headingToString(gPidTestHeading), pidSourceToString(displaySource));
@@ -3838,6 +3903,22 @@ static void eventConfigFieldText(EventConfigField field, char* buffer, size_t si
       formatCompactValue(value, sizeof(value), activeSettings.pidWallDistance_x100, 2);
       snprintf(buffer, size, "1Wall:%s", value);
       break;
+    case EventConfigField::OneWallDeadband:
+      formatCompactValue(value, sizeof(value), activeSettings.pidDeadband1W_x100, 2);
+      snprintf(buffer, size, "1WDead:%s", value);
+      break;
+    case EventConfigField::TwoWallFullScale:
+      formatCompactValue(value, sizeof(value), activeSettings.pidTwoWallFullError_x100, 2);
+      snprintf(buffer, size, "2WFull:%s", value);
+      break;
+    case EventConfigField::TwoWallDeadband:
+      formatCompactValue(value, sizeof(value), activeSettings.pidDeadband2W_x1000, 3);
+      snprintf(buffer, size, "2WDead:%s", value);
+      break;
+    case EventConfigField::DFilterAlpha:
+      formatCompactValue(value, sizeof(value), activeSettings.pidDFilterAlpha_x1000, 3);
+      snprintf(buffer, size, "DAlpha:%s", value);
+      break;
     case EventConfigField::LeftOutput:
       formatCompactValue(value, sizeof(value), activeSettings.pidLeftScale_x100, 2);
       snprintf(buffer, size, "LeftOut:%s", value);
@@ -3896,8 +3977,8 @@ void drawEventTestMenuScreen() {
 void drawEventTestConfigScreen() {
   drawHeader(eventTestCaseToString(gSelectedEventTest));
   int itemCount = currentEventConfigItemCount();
-  char items[28][32];
-  const char* ptrs[28];
+  char items[32][32];
+  const char* ptrs[32];
   for (int i = 0; i < itemCount; ++i) {
     eventConfigFieldText(currentEventConfigFieldAt(i), items[i], sizeof(items[i]));
     ptrs[i] = items[i];
@@ -4075,10 +4156,8 @@ void drawRunScreen() {
 static bool screenUsesUiThrottle(Screen screen) {
   switch (screen) {
     case Screen::RunScreen:
-    case Screen::EventTestRun:
-    case Screen::UltrasonicSensorTest:
-    case Screen::IMUTest:
-    case Screen::IMUYawTest:
+      // Only throttle passive telemetry screens. Any screen that still accepts
+      // encoder/button input must redraw immediately so the UI never looks frozen.
       return true;
     default:
       return false;
@@ -4168,8 +4247,6 @@ void setup() {
 }
 
 void loop() {
-  refreshSensors();
-
   int32_t rawEncoderDelta = 0;
   noInterrupts();
   rawEncoderDelta = gEncoderRawDelta;
@@ -4189,6 +4266,7 @@ void loop() {
   gEncoderStepCarry = (int8_t)combinedEncoderDelta;
 
   if (gExecutive.running) {
+    refreshSensors();
     (void)readButtonEvent(false);
     updateExecutive();
     gCurrentScreen = Screen::RunScreen;
@@ -4196,12 +4274,14 @@ void loop() {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleEventTestRunInput(buttonEvent);
     if (gCurrentScreen == Screen::EventTestRun) {
+      refreshSensors();
       updateEventTestRun();
     }
   } else if (gCurrentScreen == Screen::MotorTune) {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleMotorTuneInput(encoderDelta, buttonEvent);
     if (gCurrentScreen == Screen::MotorTune) {
+      refreshSensors();
       runTuneMotion();
     } else {
       stopAll();
@@ -4210,6 +4290,7 @@ void loop() {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleImuPidTestInput(buttonEvent);
     if (gCurrentScreen == Screen::IMUPIDTest) {
+      refreshSensors();
       if (gImuPidTestArmed && imuUsageEnabled() && gImu.referenceValid) {
         // The IMU PID test intentionally isolates pure yaw recovery from the
         // maze-heading logic so only rotational compensation is being tuned here.
@@ -4230,6 +4311,9 @@ void loop() {
   } else {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handleIdleUiInput(encoderDelta, buttonEvent);
+    // While the robot is idle, prioritize UI input before background sensor
+    // refresh so the menu remains responsive even if sensor work is busy.
+    refreshSensors();
   }
 
   drawUI();
