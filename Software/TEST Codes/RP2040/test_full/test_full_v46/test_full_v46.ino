@@ -78,7 +78,7 @@ constexpr uint8_t IMU_SAMPLE_POLL_DELAY_MS = 1;
 // Settings storage (fixed-point x100)
 // ======================================================
 struct RuntimeSettings {
-  int pidDeadband_x100 = 60;q    
+  int pidDeadband_x100 = 60;
   int p_x1000 = 100;   //   
   int i_x1000 = 0;     //   
   int d_x1000 = 20;    //   
@@ -1328,16 +1328,16 @@ uint8_t buildIrMaskFromPins() {
 }
 
 void readIRSensors() {
-  // Swap LEFT <-> RIGHT, keep FRONT/REAR unchanged.
+  // Swap EAST <-> WEST while keeping FRONT/REAR the same.
   // Logical mapping wanted:
   //   FL <- physical FR
   //   FR <- physical FL
   //   RL <- physical RR
   //   RR <- physical RL
-  gIrFL = digitalRead(PIN_IR_RL);
-  gIrFR = digitalRead(PIN_IR_RR);
-  gIrRL = digitalRead(PIN_IR_FL);
-  gIrRR = digitalRead(PIN_IR_FR);
+  gIrFL = digitalRead(PIN_IR_FR);
+  gIrFR = digitalRead(PIN_IR_FL);
+  gIrRL = digitalRead(PIN_IR_RR);
+  gIrRR = digitalRead(PIN_IR_RL);
 
   gRawIrMask = buildIrMaskFromPins();
   gStableIrMask = gRawIrMask;
@@ -1417,10 +1417,10 @@ static void serviceUartSensorStream() {
       if (parseDistancesLine(gUartLine, d1, d2, d3, d4)) {
         // Match the newer Uno sender contract used by uno_sensor_sender_v3:
         // D1=N, D2=E, D3=S, D4=W.
-        gDistN = d3;
-        gDistE = d4;
-        gDistS = d1;
-        gDistW = d2;
+        gDistN = d1;
+        gDistE = d2;
+        gDistS = d3;
+        gDistW = d4;
         pushUltrasonicAverages(gDistN, gDistE, gDistS, gDistW);
         gUltrasonicSampleId++;
         gUltrasonicValid = true;
