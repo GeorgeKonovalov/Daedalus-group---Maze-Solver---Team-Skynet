@@ -1,0 +1,941 @@
+test_full_v57 summary
+=====================
+
+Date
+----
+- Day: Saturday
+- Time: 2026-04-18 21:47:08 +01:00
+
+Base
+----
+- Created as a new clean version from `test_full_v56.ino`
+- Purpose of v57: add IMU-only heading hold in the no-wall case by re-anchoring the IMU reference once when PID source transitions into `None`
+
+Updated files
+-------------
+- test_full_v57.ino
+- test_full_v57_summary.txt
+- test_full_v57_settings_layout.csv
+
+Implemented changes
+-------------------
+1. Motor Tune menu now shows editable runtime tuning values.
+   - Added `Global speed`, `Travel speed`, `Approach speed`, `Left drive`, and `Right drive`.
+   - Existing defaults from the previous version were preserved.
+2. Wall PID precision now uses thousandths.
+   - P, I, D are stored as x1000 and displayed as `0.000`.
+3. IMU PID now lives in a separate submenu.
+   - IMU is OFF by default.
+   - IMU P, I, D default to zero.
+   - IMU P, I, D are displayed as `0.0000`.
+   - Added a tunable pure-yaw test window with default `3.00 deg`.
+4. Event-test config now includes the real runtime PID and IMU controls.
+   - Added `Global speed`.
+   - Added wall PID fields: `P`, `I`, `D`, `Curve`, `1Wall`, `LeftOut`, `RightOut`.
+   - Added IMU fields: `IMU`, `IMUP`, `IMUI`, `IMUD`, `IMUThr`, `YawErr`, `IMUSign`.
+5. Digit editing was restored to under-digit highlighting instead of arrows.
+   - The editor now supports `00.00`, `0.000`, `0.0000`, and similar layouts.
+6. Encoder sensitivity was reduced.
+   - Menu and digit steps now require 2 encoder increments.
+7. Button handling was checked.
+   - No button interrupt path is used.
+   - Button debounce was reduced from `25 ms` to `15 ms`.
+8. IMU-off safety was made explicit.
+   - IMU rotation compensation is forced to zero when IMU is OFF.
+   - IMU PID runtime state is cleared in the OFF path.
+9. IMU PID Test was rewritten into an isolated pure-rotation yaw recovery test.
+   - It captures a fresh reference.
+   - It uses rotational movement only.
+   - If yaw error is inside the tunable window, it stands still.
+   - If yaw error is outside the tunable window, it rotates back toward zero.
+10. Start Confirmation flow was restored.
+   - Root `Start` opens the confirmation screen.
+   - Finish returns to the confirmation screen for the next sequential attempt.
+   - Short press = go, long press = back.
+11. Old IR interrupt and IR-stabilization handling were removed from the active path.
+   - IR pin interrupts are no longer attached.
+   - Repeated identical-event confirmation remains the only active confirmation path.
+12. Front stop default was updated to `4.00 cm`.
+13. `T-straight` detection was tightened.
+   - Requires `front > turnDetectDistance`.
+   - Requires exactly one front IR blocked and the other open.
+   - Finish is checked after acquire-corridor phases in both run and event-test execution.
+14. Event-test menu stability was repaired.
+   - `Right Turn`, `Left Turn`, `Random`, and `T-Junction` expose more than 32 config rows once all shared PID, IMU, and turn-specific fields are visible.
+   - The old `drawEventTestConfigScreen()` used fixed `32`-row buffers, so those tests wrote past the end of the stack arrays and corrupted UI state.
+   - The event-config buffers are now sized from `EventConfigField::Back + 1`, which covers the full menu safely.
+   - The selected event-config row is now normalized whenever the dynamic list is entered, handled, drawn, or returned to from a run.
+15. `T-Junction Straight` now requires prior `T-Junction` and `Dead-End` confirmation.
+   - Real execution and preview runs now track two per-attempt flags: `tJunctionRaised` and `deadEndRaised`.
+   - `T-Junction Straight` is only classified when both flags are already true.
+   - The flags are raised only after the corresponding events are actually confirmed by the runtime logic.
+   - The dedicated `T-Jct Straight` event test is intentionally pre-armed with both flags so that isolated testing still works.
+16. No-wall IMU-only heading hold was integrated into the normal drive path.
+   - `NoWalls` is still represented by PID source `None` using the existing side-wall threshold rule.
+   - Wall PID output remains exactly zero when the active source is `None`.
+   - IMU correction remains active in the same path when IMU is enabled.
+   - On the transition from any wall-guided source into `None`, the IMU reference is re-anchored once to the current live yaw so the robot holds the direction it had when side walls disappeared.
+   - The re-anchor is not repeated while the robot stays in `None`.
+
+Bugs and issues found during the pass
+------------------------------------
+- The old version still exposed IR-stable timing even though the requested event logic no longer wanted IR stabilization as a separate confirmation stage.
+- The old event-test page did not expose the real runtime PID parameters.
+- IMU PID tuning lived on the wall PID page, which made tuning and debugging harder.
+- The old digit editor was still hard-wired around a fixed `00.00` layout and arrow behavior.
+- The old encoder path stepped on every single quadrature increment, making editing too sensitive.
+- The old IMU PID test still depended on heading-based motion framing instead of a pure yaw-only recovery path.
+- The old root `Start` action skipped the start-confirmation screen.
+- The old IR interrupt path was still attached in setup.
+- Legacy names such as `gStableIrMask` still remain; the logic is direct now, but the name is still inherited.
+- The old event-test config screen only reserved 32 visible rows even though the turn-oriented tests can expose up to 39 rows, causing a stack overwrite that looked like random encoder/button freezes.
+- Before v56, `T-Junction Straight` could appear from side-open geometry alone even if the run had never passed through the intended `T-Junction` and `Dead-End` sequence.
+- Before v57, the `None` PID-source case already zeroed wall correction, but it did not re-anchor the IMU reference when side walls disappeared, so IMU yaw hold kept using the older reference instead of the entry direction of the open-space segment.
+
+Sanity checks completed
+-----------------------
+- Checked that IMU compensation has an explicit OFF gate.
+- Checked that IMU PID test uses pure rotation only.
+- Checked that button interrupt is not used; only encoder A/B interrupts remain.
+- Checked that event-test config exposes the requested wall PID and IMU PID fields.
+- Checked that motor-tuning menu exposes the requested tuning values.
+- Checked that finish is evaluated after acquire-corridor phases with corridor confirmation still prioritized first.
+- Checked that `TJunctionStraight` now requires exactly one front IR blocked.
+- Checked that the event-test config screen now allocates enough storage for every possible visible field combination, including separate right-wall PID fields and all turn-only rows.
+- Checked that the event-test config selection is clamped against the live row count before input handling and drawing.
+- Checked that real runs and preview runs start with `T-Junction Straight` disarmed and only arm it after both `T-Junction` and `Dead-End` are confirmed.
+- Checked that the dedicated `T-Jct Straight` event test starts pre-armed so the isolated test path remains usable.
+- Checked that `computeWallCorrection()` still returns zero for PID source `None`.
+- Checked that `followSmart()` and `followSmartForced()` now re-anchor IMU once only on `non-None -> None` transitions.
+- Checked that the existing 2-wall PID, 1-wall PID, and IMU PID math bodies were not changed.
+
+Verification status
+-------------------
+- Source-level review only
+- `arduino-cli` is not installed in this workspace, so no board compile was run here
+- `git` is not installed in this workspace, so this report includes curated changed-code excerpts instead of a git diff
+
+Changed code excerpts
+---------------------
+1. Runtime settings precision and defaults
+
+```cpp
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 15;
+
+int p_x1000 = 70;
+int i_x1000 = 0;
+int d_x1000 = 0;
+uint8_t imuEnabled = 0;
+int imuP_x10000 = 0;
+int imuI_x10000 = 0;
+int imuD_x10000 = 0;
+int imuPidTestYawError_x100 = 300;
+int overallSpeedScale_x100 = 100;
+int frontStopDistance_x100 = 400;
+```
+
+2. Runtime config conversion
+
+```cpp
+gCfg.p = fixedToFloat3(activeSettings.p_x1000);
+gCfg.i = fixedToFloat3(activeSettings.i_x1000);
+gCfg.d = fixedToFloat3(activeSettings.d_x1000);
+gCfg.imuP = fixedToFloat4(activeSettings.imuP_x10000);
+gCfg.imuI = fixedToFloat4(activeSettings.imuI_x10000);
+gCfg.imuD = fixedToFloat4(activeSettings.imuD_x10000);
+gCfg.imuPidTestYawErrorDeg = fixedToFloat2(activeSettings.imuPidTestYawError_x100);
+```
+
+3. Event-test menu freeze repair
+
+```cpp
+constexpr int EVENT_CONFIG_FIELD_COUNT = (int)EventConfigField::Back + 1;
+constexpr size_t EVENT_CONFIG_TEXT_SIZE = 32;
+
+static int normalizeEventTestConfigIndex(int requestedIndex) {
+  int itemCount = currentEventConfigItemCount();
+  if (itemCount <= 0) return 0;
+  if (requestedIndex < 0) return 0;
+  if (requestedIndex >= itemCount) return itemCount - 1;
+  return requestedIndex;
+}
+
+char items[EVENT_CONFIG_FIELD_COUNT][EVENT_CONFIG_TEXT_SIZE];
+const char* ptrs[EVENT_CONFIG_FIELD_COUNT];
+```
+
+4. T-Junction Straight gating
+
+```cpp
+static bool tJunctionStraightReady(bool tJunctionRaised, bool deadEndRaised) {
+  return tJunctionRaised && deadEndRaised;
+}
+
+if (tJunctionStraightArmed &&
+    (!leftWall || !rightWall) &&
+    frontCm > gCfg.turnDetectDistanceCm) {
+  return EventType::TJunctionStraight;
+}
+```
+
+5. Event-test pre-arm for isolated T-Straight testing
+
+```cpp
+static bool eventTestStartsWithTJunctionStraightArmed(EventTestCase testCase) {
+  return testCase == EventTestCase::TJunctionStraight;
+}
+
+gEventTestRun.tJunctionRaised = eventTestStartsWithTJunctionStraightArmed(gSelectedEventTest);
+gEventTestRun.deadEndRaised = eventTestStartsWithTJunctionStraightArmed(gSelectedEventTest);
+```
+
+6. No-wall IMU reference re-anchor
+
+```cpp
+void handleNoWallImuTransition(PidSource previousSource, PidSource nextSource) {
+  if (nextSource != PidSource::None || previousSource == PidSource::None) {
+    return;
+  }
+  if (!imuUsageEnabled()) {
+    return;
+  }
+  (void)reanchorImuReferenceToCurrentHeading();
+}
+```
+
+```cpp
+PidSource previousSource = gActivePidSource;
+PidSource controlSource = stabilizedPidSource(frame, gActivePidSource);
+handleNoWallImuTransition(previousSource, controlSource);
+```
+
+7. Global speed scaling in runtime config
+
+```cpp
+gCfg.overallSpeedScale = clampFloat(fixedToFloat2(activeSettings.overallSpeedScale_x100), 0.0f, 1.0f);
+```
+
+8. Explicit IMU-off protection
+
+```cpp
+float currentImuRotationCompensation(ImuPidRuntime& runtime) {
+  if (!imuUsageEnabled()) {
+    runtime.previousError = 0.0f;
+    runtime.integral = 0.0f;
+    runtime.previousMs = millis();
+    gImu.lastCompensationCmd = 0.0f;
+    return 0.0f;
+  }
+  return applyImuCompensation(runtime);
+}
+```
+
+9. Global speed scaling in the wheel output path
+
+```cpp
+fl *= gCfg.overallSpeedScale;
+fr *= gCfg.overallSpeedScale;
+rr *= gCfg.overallSpeedScale;
+rl *= gCfg.overallSpeedScale;
+```
+
+10. Encoder sensitivity reduced to 2 increments per menu step
+
+```cpp
+int combinedEncoderDelta = rawEncoderDelta + gEncoderStepCarry;
+int encoderDelta = 0;
+while (combinedEncoderDelta >= 2) {
+  encoderDelta++;
+  combinedEncoderDelta -= 2;
+}
+while (combinedEncoderDelta <= -2) {
+  encoderDelta--;
+  combinedEncoderDelta += 2;
+}
+gEncoderStepCarry = (int8_t)combinedEncoderDelta;
+```
+
+11. Digit editor changed from arrows to underline highlighting
+
+```cpp
+formatPaddedValue(numeric, sizeof(numeric), gDigitEditor.tempValue, gDigitEditor.integerDigits, gDigitEditor.decimals);
+...
+u8g2.drawHLine(selectedX - 1, underlineY, selectedW + 2);
+if (gDigitEditor.digitUnlocked) {
+  u8g2.drawHLine(selectedX - 1, underlineY + 2, selectedW + 2);
+} else {
+  u8g2.drawHLine(selectedX - 1, underlineY + 1, selectedW + 2);
+}
+```
+
+12. Separate IMU PID submenu and isolated IMU PID test entry
+
+```cpp
+case Screen::IMUPIDMenu:           handleImuPidMenuInput(encoderDelta, buttonEvent); break;
+...
+case Screen::IMUPIDMenu:           drawImuPidMenuScreen(); break;
+```
+
+```cpp
+case 7:
+  gImuPidTestArmed = false;
+  resetImuPid();
+  stopAll();
+  if (imuUsageEnabled()) {
+    gImuPidTestArmed = captureImuReference();
+  }
+  gCurrentScreen = Screen::IMUPIDTest;
+  break;
+```
+
+13. Pure-rotation IMU PID test execution
+
+```cpp
+if (gImuPidTestArmed && imuUsageEnabled() && gImu.referenceValid) {
+  float allowedYawErrorDeg = max(gCfg.imuPidTestYawErrorDeg, gImu.combinedDeadbandDeg);
+  if (fabsf(gImu.yawErrorDeg) <= allowedYawErrorDeg) {
+    resetImuPid();
+    stopAll();
+  } else {
+    float rotationComp = currentImuRotationCompensation(gImuPid);
+    driveBodyFrame(0.0f, 0.0f, rotationComp);
+  }
+} else {
+  stopAll();
+}
+```
+
+14. Root start now goes through confirmation and finish returns there
+
+```cpp
+case 0:
+  gCurrentScreen = Screen::StartConfirm;
+  break;
+```
+
+```cpp
+gExecutive.running = false;
+gExecutive.state = NavState::Finished;
+gExecutive.displayEvent = EventType::Finish;
+gExecutive.latchedEvent = EventType::Finish;
+gCurrentScreen = Screen::StartConfirm;
+```
+
+15. T-straight detection and finish re-check
+
+```cpp
+bool oneFrontBlocked = (frontRightBlocked != frontLeftBlocked);
+...
+if (oneFrontBlocked && frame.front > gCfg.turnDetectDistanceCm) {
+  return EventType::TJunctionStraight;
+}
+```
+
+```cpp
+PerceptionFrame finishFrame = frame;
+finishFrame.candidate = (frame.candidate == EventType::Finish) ? EventType::Finish : EventType::SensorWait;
+EventType finishConfirmed = EventType::Idle;
+if (updateEventConfirmation(finishFrame, finishConfirmed) && finishConfirmed == EventType::Finish) {
+  finishExecution();
+  return;
+}
+```
+
+16. IR interrupt path removed from setup
+
+```cpp
+attachInterrupt(digitalPinToInterrupt(ENC_A_PIN), onEncoderEdge, CHANGE);
+attachInterrupt(digitalPinToInterrupt(ENC_B_PIN), onEncoderEdge, CHANGE);
+```
+
+17. Event-test config now exposes wall PID, IMU PID, and global speed
+
+```cpp
+case EventConfigField::OverallSpeed:
+case EventConfigField::WallP:
+case EventConfigField::WallI:
+case EventConfigField::WallD:
+case EventConfigField::CurveB:
+case EventConfigField::OneWallTarget:
+case EventConfigField::LeftOutput:
+case EventConfigField::RightOutput:
+case EventConfigField::ImuToggle:
+case EventConfigField::ImuP:
+case EventConfigField::ImuI:
+case EventConfigField::ImuD:
+case EventConfigField::ImuThreshold:
+case EventConfigField::ImuTestYawError:
+case EventConfigField::ImuSign:
+  return true;
+```
+
+Useful notes for the next version
+---------------------------------
+- The active logic no longer uses IR interrupt confirmation, but the variable name `gStableIrMask` is still inherited and could be renamed later for clarity.
+- A real compile pass with `arduino-cli` is still needed before hardware testing.
+- The current width-based underline placement scales better than fixed x-coordinate tables and should be kept if more digit formats are added later.
+- If needed later, motor-input live monitoring can be added as a dedicated screen without changing the current PID architecture.
+
+Detailed fix explanations
+-------------------------
+1. Motor Tune menu expansion
+   - Before this pass, the motor-tuning page mainly exposed motion actions and hid some of the runtime tuning values that actually shape the drive output.
+   - The fix makes the menu useful as a real tuning surface by exposing the travel speed, approach speed, left/right drive scaling, and the new global speed scale in one place.
+   - The practical effect is that drivetrain balancing and speed limiting can now be adjusted without hunting through unrelated menus.
+
+2. Wall PID precision changed to `0.000`
+   - The old `0.00` precision was coarse for small PID tuning changes, especially around low gains where one step could be too large.
+   - Moving to thousandths gives much finer control while still staying readable on the OLED.
+   - The storage, runtime conversion, menu editors, and displays were aligned so the precision is consistent everywhere.
+
+3. IMU PID moved into its own submenu
+   - Wall-follow PID and IMU yaw-hold PID serve different control roles, so combining them on one page made tuning harder and easier to confuse.
+   - Separating them reduces accidental changes and makes it clearer whether we are tuning lateral wall correction or rotational compensation.
+   - This also makes it easier to keep IMU disabled by default and only turn it on when intentionally testing it.
+
+4. IMU defaults set to OFF with zero PID gains
+   - This is a safety and tuning sanity choice.
+   - If IMU starts enabled with nonzero gains, it can influence wall-following behavior before the user has verified sign, threshold, and stability.
+   - Starting with IMU off and all-zero gains makes the robot begin from the simpler non-IMU control path.
+
+5. IMU display precision changed to `0.0000`
+   - IMU P/I/D gains often need much smaller values than the ultrasonic wall PID.
+   - Four decimal places make the menu usable for very gentle yaw-hold tuning, especially on a light and noisy platform.
+   - This prevents the user from being forced into gains that are too large just because the editor resolution is too coarse.
+
+6. Global speed scale added
+   - The purpose of this fix is to reduce all motor outputs equally without distorting the tuned relationship between wall PID, IMU correction, and drive calibration.
+   - It acts at the end of the wheel-output path, so it behaves like a master output limiter rather than a direction-specific gain.
+   - This is useful when the robot is mechanically too fast overall, but the relative tuning already feels correct.
+
+7. Explicit IMU-off zeroing
+   - The goal here was to remove any chance that stale rotational compensation survives after IMU is switched off.
+   - Instead of only “not using” the IMU path implicitly, the code now explicitly zeros the returned compensation and clears the IMU PID runtime state.
+   - This is important for trustworthy tuning because the user can now be confident that IMU-off really means no yaw-hold influence.
+
+8. Isolated IMU PID test behavior
+   - The old behavior mixed IMU correction with the robot heading/motion frame, which made it harder to tell whether the IMU controller itself was correct.
+   - The new test captures a fresh reference, compares current yaw against that reference, and applies rotational compensation only.
+   - If the yaw error is already inside the allowed window, the robot stays still instead of continuing to “hunt”.
+   - This makes the IMU test a much cleaner sign-and-gain verification tool.
+
+9. Digit editor underline restoration
+   - The earlier fixed-digit editor behavior had been tuned visually by the user and worked better than the newer arrow-style indicator.
+   - The new implementation keeps the old underline feel, but makes the underline position dynamic so it works across multiple numeric formats.
+   - This means the UI keeps the familiar style without being limited to one hard-coded format.
+
+10. Reduced encoder sensitivity
+   - Rotary encoders often produce a lot of very small transitions, and reacting to every one of them makes the UI feel jumpy.
+   - Requiring 2 increments per menu/edit step lowers sensitivity without removing responsiveness.
+   - This especially helps when editing decimal values, because it reduces accidental overshoot.
+
+11. Button responsiveness review
+   - The button was checked for interrupt usage and confirmed to remain polling-based.
+   - Because there is no button interrupt path, the main responsiveness improvement here was lowering debounce time rather than redesigning the input model.
+   - This keeps the logic simple while still improving menu feel.
+
+12. Start confirmation restoration
+   - The root start action had become too direct for a system with many tunable parameters and sequential attempts.
+   - Returning to a confirmation screen gives the user one stable checkpoint before each real attempt.
+   - Sending finish back to the same screen also makes repeated attempts feel consistent rather than dropping the user into a less relevant screen.
+
+13. Removal of IR interrupt and IR-stable confirmation path
+   - The requested event-confirmation logic is based on repeated identical event detections over time, not on a separate IR stabilization stage.
+   - Leaving the old IR interrupt/stable path active would have created mixed confirmation models and made behavior harder to reason about.
+   - The fix simplifies the logic so event confirmation follows one timing model everywhere.
+
+14. Front stop default changed from `2.00 cm` to `4.00 cm`
+   - The old default was aggressive and left very little reaction margin near a wall.
+   - Increasing it to `4.00 cm` gives a safer and more practical default stopping distance while still keeping it tunable.
+   - This is especially useful when real hardware noise and inertia are higher than in ideal testing.
+
+15. T-straight overtrigger reduction
+   - The previous detection was too permissive, so some non-T-straight cases could be interpreted as T-straight.
+   - The new rule requires the front distance to be beyond turn-detect range and requires exactly one front IR sensor blocked while the other is open.
+   - That makes the event definition much closer to the intended geometry and reduces false positives near finish/end-like layouts.
+
+16. Finish check added after acquire-corridor phases
+   - Corridor reacquisition was already prioritized, which is correct for most movement continuity.
+   - But without a finish re-check after that phase, the robot could continue past a legitimate finish transition.
+   - The updated sequence preserves corridor priority first, then checks whether finish has been the repeated confirmed event instead.
+
+17. Event-test config expanded with PID and IMU settings
+   - Event tests are supposed to reflect real runtime behavior as closely as possible.
+   - If event-test pages hide the actual control parameters, tuning done there becomes incomplete or misleading.
+   - Adding wall PID, IMU PID, and global speed to event config makes each event test a more faithful tuning harness.
+
+18. Documentation structure improvement
+   - The report now records not only the implemented changes but also the reasons behind them and the intended behavioral result.
+   - This should make the next version easier to continue, because the document now explains the design intent instead of only listing edits.
+
+Timing optimization addendum for v39
+------------------------------------
+
+This timing-focused pass improves the sensing path without pushing the hardware into aggressive edge-case values.
+
+1. RP2040 UART raised to `115200`
+   - The RP2040 sketch now starts `Serial1` at `115200` to match the planned Uno-side change.
+   - This cuts the time spent waiting for each ultrasonic text packet to arrive.
+   - The change is meaningful because UART transfer time was one of the dominant delays in the end-to-end ultrasonic update path.
+
+2. UART field mapping aligned to the provided Uno sender
+   - The RP2040 parser now interprets the incoming text as `D1=N`, `D2=E`, `D3=S`, `D4=W`, which matches the Uno code provided for this timing review.
+   - This is important because any direction-order mismatch can make timing tuning look wrong when the real issue is sensor remapping.
+
+3. Ultrasonic stale timeout reduced
+   - `ULTRASONIC_STALE_MS` was reduced from `500 ms` to `200 ms`.
+   - Half-second-old ultrasonic data was too old for corridor/event handling on a moving robot.
+   - The new value is still safe but much less likely to let outdated distances drive control.
+
+4. Ultrasonic moving average shortened
+   - `ULTRASONIC_AVG_COUNT` was reduced from `5` to `3`.
+   - This keeps some smoothing for wall PID while removing a large amount of delay from the distance signal.
+   - The goal here was to improve responsiveness without jumping fully to raw values everywhere.
+
+5. Event detection now uses fresh raw ultrasonic distances
+   - Event classification and corridor reacquisition now use the most recent received ultrasonic distances instead of the averaged values.
+   - Wall PID source selection and wall-following control still use filtered distances.
+   - This split keeps event detection fast while avoiding unnecessary PID noise.
+
+6. Distance fallback bug removed
+   - The heading-distance helper now falls back to the latest raw distance until the averaging buffer has valid content.
+   - Before this change, startup behavior could read as zero-distance until the average buffer filled, which could distort early event logic and safety behavior.
+
+7. Fresh-packet-based confirmation scheduler
+   - Event confirmation still uses the menu-configured delay and match count, but it no longer increments just because the main loop ran again.
+   - A match is only counted when:
+     1. the configured delay has expired, and
+     2. a new ultrasonic packet has actually arrived.
+   - This makes confirmation behave much closer to the intended “wait, re-check, confirm” model.
+
+8. No hardware timer ISR was added for event confirmation
+   - A true timer interrupt would not create fresher ultrasonic information, because ultrasonic packets arrive over UART asynchronously.
+   - Using an ISR here would mostly risk re-checking stale data and complicating state sharing between interrupt and main control code.
+   - The fresh-packet scheduler gives the same conceptual behavior more safely and with better real-world timing fidelity.
+
+9. RP2040 OLED traffic reduced
+   - The OLED is now redrawn at a controlled interval instead of every single loop pass.
+   - This lowers loop-time pressure and helps the processor service UART and control logic more consistently.
+   - The chosen refresh interval remains visually responsive while being much lighter on I2C bandwidth.
+
+10. RP2040 I2C clock increased
+   - The RP2040 now sets the I2C clock to `400 kHz`.
+   - This reduces OLED transfer time and helps prevent display updates from dominating the loop timing.
+
+11. IMU blocking sample timeout reduced
+   - The blocking IMU sample helper timeout was reduced from `250 ms` to `80 ms`, and its poll delay was shortened.
+   - This does not remove the blocking nature of IMU reference capture, but it reduces the worst-case stall when a sample is temporarily unavailable.
+
+12. Default event recheck gap reduced
+   - The default `Check Gap` was reduced from `0.10 s` to `0.05 s`.
+   - Because confirmation now requires fresh ultrasonic packets as well as elapsed time, this lower default speeds up validation without causing the old repeated-loop overcounting problem.
+
+Suggested Uno-side matching settings
+-----------------------------------
+
+1. Keep the shared trigger sequence safe rather than extreme:
+   - keep a practical inter-sensor delay such as `5 ms`
+   - do not push it down to edge-case values just because the theoretical echo time is shorter
+
+2. Change Uno UART to `115200`
+   - This is expected by the RP2040 `v39` sketch.
+
+3. Keep the packet order as:
+   - `D1 = North`
+   - `D2 = East`
+   - `D3 = South`
+   - `D4 = West`
+
+Known remaining timing limitations
+---------------------------------
+
+1. IMU reference capture is still blocking by design.
+2. The Uno ultrasonic sender is still sequential and `pulseIn`-based.
+3. Event confirmation is now much more faithful to fresh data, but its speed still depends on the real ultrasonic packet rate coming from the Uno.
+
+v40 follow-up: encoder/digipot and post-finish confirmation
+-----------------------------------------------------------
+
+This pass focused on the issues that started showing up after the timing update, especially the intermittent feel of the encoder/digit editor path.
+
+1. Encoder interrupt path reviewed
+   - The encoder is still interrupt-driven on both A and B channels.
+   - The timing update itself did not remove or disable those interrupts.
+   - The main issue was not that interrupts stopped firing, but that the UI throttling introduced in the timing pass was broad enough to make interactive screens feel intermittently unresponsive.
+
+2. Encoder state initialization added
+   - The encoder ISR previously started from an implicit zero state and only learned the real hardware state after the first edge.
+   - v40 seeds the encoder state from the actual pin levels before interrupts are enabled.
+   - This makes first movement after boot and some recovery cases more reliable.
+
+3. Encoder delta storage widened
+   - The raw encoder delta was widened from a smaller signed type to a larger one.
+   - This is a robustness fix so short bursts of movement are less likely to be clipped by the accumulator while the main loop is busy.
+
+4. UI throttling narrowed to passive screens only
+   - In v39, UI throttling was applied globally.
+   - That improved sensing timing, but it also made menus and digit editing feel like the encoder “stopped working” at times because redraws were intentionally delayed.
+   - In v40, throttling is now limited to passive runtime-style screens such as execution and monitor views.
+   - Interactive menu screens, including digit editing and tuning pages, now redraw immediately again.
+
+5. Why the interrupt model was not completely redesigned
+   - The existing quadrature interrupt model is still appropriate for this project.
+   - The observed issue was much more strongly tied to UI redraw timing than to missing hardware interrupts.
+   - Because of that, the fix was kept focused and meaningful instead of replacing the whole encoder model unnecessarily.
+
+6. Post-finish confirmation screen clarified
+   - The execution path already returned to the confirmation screen after finish detection.
+   - However, the screen only showed a useful “Next” label for sequence mode and used a placeholder for the other route modes.
+   - v40 now shows the actual next trial mode consistently for sequence, right, left, and selection.
+
+7. What was intentionally left unchanged
+   - Button input remains polling-based.
+   - The encoder still requires the existing reduced-sensitivity step accumulation behavior that was requested earlier.
+   - The sensing timing optimizations from v39 remain in place.
+
+v41 event-logic rollback
+------------------------
+
+This pass was focused specifically on making the event path behave like `v37` again, while keeping the later non-event improvements around it.
+
+1. Averaged ultrasonic data restored for the whole event path
+   - Event detection now uses averaged `front/left/right` distances again.
+   - Corridor confirmation now uses the same averaged geometry.
+   - The compatibility fields named `frontRaw/leftRaw/rightRaw` are filled from the averaged values too, so there is no hidden event path still using latest-packet distances.
+
+2. Repeated-time confirmation restored
+   - Runtime event confirmation no longer waits for a fresh UART sample id before counting a new match.
+   - Event-test confirmation was reverted the same way so event tests mirror the real execution path again.
+   - This makes the event feel match `v37` much more closely.
+
+3. Default event-confirmation gap restored
+   - `Check gap` default returned to `0.10 s`.
+   - This is intentionally closer to `v37` and less aggressive than the raw-packet tuning pass.
+
+4. Ultrasonic averaging depth is now tunable
+   - Added `US avg k` in `Settings`.
+   - Default is `5`.
+   - Range is `1..5`.
+   - Changing the value clears the current averaging buffer so the new depth starts cleanly.
+
+5. Regressions addressed by this rollback
+   - Raw ultrasonic event detection made stops and junction-like events react too easily to single bad packets.
+   - Detection and handling had drifted apart because detection used latest-packet distances while handling and wall following still used averaged distances.
+   - The fresh-packet confirmation model changed the overall event feel enough that the robot no longer behaved like the older stable versions.
+
+6. What was intentionally not changed in v41
+   - UART and general runtime timing improvements from later versions were left intact.
+   - The executive state machine flow was not redesigned.
+   - This pass was intentionally scoped to restore the older event-feel first before making any further handling changes.
+
+v42 ultrasonic orientation fix
+------------------------------
+
+1. Restored the older UART packet mapping from `v37`.
+   - RP2040 now interprets the incoming Uno packet as:
+     - `D1 = South`
+     - `D2 = West`
+     - `D3 = North`
+     - `D4 = East`
+   - This matches the older working event/control orientation instead of the newer parser assumption.
+
+2. Why this fix was needed
+   - `v41` still used the newer packet assumption `D1=N, D2=E, D3=S, D4=W`.
+   - `v37` used `D1=S, D2=W, D3=N, D4=E`.
+   - If the Uno sender or the physical wiring still matches the older order, then left/right and front/back become swapped in the RP2040 logic.
+
+3. Scope of the fix
+   - Only the UART-to-world-direction assignment was changed.
+   - Event logic, handling, and averaged-ultrasonic behavior from `v41` were left unchanged.
+
+4. Important alignment note
+   - This `v42` RP2040 code is intended to match the older `v37` packet orientation.
+   - If you flash a Uno sender that outputs `D1=N, D2=E, D3=S, D4=W`, then this RP2040 version will no longer match that sender and the orientation will be wrong again.
+
+v43 ultrasonic orientation realignment
+--------------------------------------
+
+1. Restored the RP2040 parser to the newer Uno sender contract.
+   - RP2040 now interprets the incoming packet as:
+     - `D1 = North`
+     - `D2 = East`
+     - `D3 = South`
+     - `D4 = West`
+
+2. Why `v43` was needed after `v42`
+   - The `v42` mapping matched the older `v37` packet order.
+   - Your current sender path is using the newer Uno order instead, so `v42` caused both left/right and front/back to appear swapped.
+
+3. Intended pairing
+   - `test_full_v43.ino` is the RP2040 version intended to pair with `uno_sensor_sender_v3.ino`.
+   - If you ever switch back to an older Uno sender that outputs `D1=S, D2=W, D3=N, D4=E`, then `v43` will no longer match that sender.
+
+v44 IR front/rear fix
+---------------------
+
+1. Restored direct front/rear meaning for the IR pin names.
+   - `FL -> NW`
+   - `FR -> NE`
+   - `RL -> SW`
+   - `RR -> SE`
+
+2. What changed
+   - The IR pin-to-world mapping in `buildIrMaskFromPins()` was updated.
+   - The IR test screen labels were updated to match the runtime mapping.
+
+3. What stayed the same
+   - Left/right orientation was intentionally left unchanged.
+   - Ultrasonic mapping from `v43` was left unchanged.
+
+v46 compile and sensor-mapping repair
+-------------------------------------
+
+1. Repaired the `v45` source corruption
+   - Removed the stray `q` after `pidDeadband_x100`.
+   - That typo was what broke the `RuntimeSettings` struct and caused the cascade of missing-member compile errors for `p_x1000`.
+
+2. IR east/west swap corrected
+   - The logical IR sensors are now read as:
+     - `FL <- physical FR`
+     - `FR <- physical FL`
+     - `RL <- physical RR`
+     - `RR <- physical RL`
+   - This keeps front/rear the same while swapping east and west, as requested.
+
+3. Ultrasonic packet order corrected
+   - The RP2040 parser now matches the current Uno sender contract exactly:
+     - `D1 = North`
+     - `D2 = East`
+     - `D3 = South`
+     - `D4 = West`
+   - The previous `v45` code had the correct comment but the wrong assignments underneath it.
+
+4. Scope
+   - Event logic and handling from the `v41` rollback were left intact.
+   - This pass only repaired the broken code and aligned sensor orientation/mapping.
+
+v47 menu responsiveness repair
+------------------------------
+
+1. Removed redraw throttling from interactive screens
+   - The timing-optimization pass had started rate-limiting several screens that still accept encoder or button input.
+   - That made the menu appear to lag or freeze even when input was still being received.
+   - `v47` keeps the throttle only for the passive run screen.
+
+2. Prioritized idle-menu input before background sensor refresh
+   - In the earlier timing-updated loop, `refreshSensors()` always ran before reading the encoder and button state.
+   - If sensor work took longer on a given loop, the menu felt sticky because input had to wait behind that work.
+   - `v47` now handles menu input first whenever the robot is not actively running.
+
+3. What did not change
+   - Menu text, labels, and screen layouts were left unchanged.
+   - Event logic, control logic, and sensor-display content were left unchanged.
+   - This was intentionally a responsiveness-only repair.
+
+v48 bounded two-wall PID
+------------------------
+
+1. Two-wall wall-following now uses a bounded normalized side difference.
+   - The old two-wall error was simply `right - left` in centimetres.
+   - `v48` now interprets the side difference relative to a configurable full-scale value:
+     - `two-wall error = clamp((right - left) / fullScaleCm, -1, 1)`
+   - The default full-scale side difference is `8.00 cm`, so:
+     - `R - L = 0.0 cm` -> `0.0`
+     - `R - L = +8.0 cm` -> `+1.0`
+     - `R - L = -8.0 cm` -> `-1.0`
+
+2. One-wall and two-wall deadbands are now separated.
+   - One-wall mode keeps an absolute distance error in centimetres and now uses its own deadband.
+   - Two-wall mode now uses a normalized deadband on the scaled `[-1, 1]` error.
+   - Default values:
+     - `1-wall deadband = 0.60 cm`
+     - `2-wall deadband = 0.050`
+
+3. Derivative filtering is now configurable.
+   - The derivative term still uses a first-order low-pass filter.
+   - `v48` exposes the derivative filter alpha as a tunable shared PID parameter.
+   - Default value:
+     - `D filter alpha = 0.200`
+
+4. Two-wall shaping was made unit-consistent.
+   - The wall-error shaping limit is now selected by PID source:
+     - one-wall uses the existing centimetre-scale shaping limit
+     - two-wall uses a normalized `1.0` full-scale limit
+   - This keeps the curve shaping meaningful after switching two-wall mode away from raw centimetres.
+
+5. Shared menus were extended for the new PID model.
+   - Added to the PID menu:
+     - `1-wall Deadband`
+     - `2-wall Full`
+     - `2-wall Deadband`
+     - `D Filter Alpha`
+   - Added the same shared fields to the event-test configuration menu so event tests use the same new wall-PID model.
+
+6. Starting wall-PID gains were updated for the new bounded error.
+   - Default wall PID values are now:
+     - `P = 0.800`
+     - `I = 0.000`
+     - `D = 0.080`
+   - These match the new `[-1, 1]` two-wall error scale much better than the older centimetre-based defaults.
+
+7. Menu buffer sizes were expanded where the new PID fields increased item count.
+   - The PID menu now has more entries than before.
+   - The event-test config screen also needed a larger local item buffer so the new shared PID fields do not overrun the old fixed-size arrays.
+
+v49 imu defaults and menu stability
+1. IMU defaults were changed as requested.
+   - Shared runtime defaults are now:
+     - `IMU On = ON`
+     - `IMU Sign = -1`
+     - `IMU P = 0.0050`
+     - `IMU I = 0.0000`
+     - `IMU D = 0.0000`
+
+2. Wall PID defaults were softened as requested.
+   - Shared wall PID defaults are now:
+     - `P = 0.500`
+     - `I = 0.000`
+     - `D = 0.000`
+
+3. The remaining intermittent menu freeze was addressed in the encoder path.
+   - `v48` still used interrupts on both encoder channels and then divided the accumulated quadrature edges into menu steps.
+   - Under timing load, losing one quadrature edge could leave the carry at a half-step and make a knob detent appear to do nothing.
+   - `v49` now uses only channel-A interrupts and samples channel-B for direction.
+   - The menu sensitivity is still kept at `2` encoder edges per UI step, so the user-facing menu behaviour stays reduced in sensitivity without changing labels or layouts.
+
+4. OLED bus timing was relaxed slightly for menu reliability.
+   - The OLED I2C clock was reduced from `400 kHz` to `200 kHz`.
+   - This keeps the screen content identical while reducing the chance of timing-related stalls or glitchy UI behaviour on the display bus.
+
+v50 packaged execution and attempt-planning update
+--------------------------------------------------
+
+1. Event recognition and event handling refactor from the latest in-place `v49` work are now preserved as a clean versioned snapshot.
+   - The `.ino` in this version keeps the current reactive event recognition flow, stop-gated turn handling, and continuous PID-source interpretation exactly as they stood in the working `v49` file.
+   - No sensor pin remap or naming cleanup was performed in this packaging pass; the physically corrected live mapping was intentionally preserved as-is.
+
+2. Dead-end handling now flips heading immediately.
+   - When `DeadEnd` is confirmed, the runtime and event-test flows immediately switch the logical heading to the opposite direction.
+   - This rearranges sensor interpretation right away instead of waiting behind the normal turn-stop sequence.
+
+3. Event triggering is now suppressed while an already confirmed event is being handled.
+   - New event confirmation remains enabled in corridor driving.
+   - Once an event is confirmed and the handler moves into approach/turn/reacquire stages, event triggering is disabled until corridor driving is reached again.
+   - This prevents handling stages from being disturbed by fresh event detections from the same geometry.
+
+4. Finish now returns to a richer confirmation screen for the next attempt.
+   - `StartConfirm` now shows the previous `Right`, `Left`, and `Selection` attempt results.
+   - Each attempt line records elapsed time plus whether that route saw a confirmed dead-end.
+
+5. Sequence-mode third-attempt selection is now planned before the run starts.
+   - The third `Selection` attempt now compares the completed `Right` and `Left` attempts first.
+   - Preference order:
+     - choose the route with no dead-end
+     - if both are clean, choose the smaller run time
+     - if both had dead-ends, block the third attempt and surface an error on the start-confirmation screen
+   - This choice is intentionally made before the attempt begins, not mid-run.
+
+6. Execution State now mirrors the real start/execution logic without driving the motors.
+   - Opening `Execution State` launches a no-motor preview flow that reuses the same event recognition and handling style as the real run.
+   - The screen now shows live IR plus ultrasonic data while the preview state machine advances.
+   - This makes the screen useful as a logic preview instead of only a static monitor.
+
+7. Scope of the v50 packaging pass.
+   - The goal here was not to alter the current logic again.
+   - The goal was to freeze the current working `v49` behavior into a proper new version folder and bring the documentation files up to date with the current code.
+
+v51 compile repair for packaged planner helpers
+-----------------------------------------------
+
+1. Removed an illegal duplicate helper declaration introduced during packaging.
+   - `v50` contained two `plannerRecordForMode(RouteMode)` helpers that differed only by return-type constness.
+   - C++ does not allow overloading functions by return type alone, so this produced the reported `ambiguating new declaration` compile error.
+
+2. Preserved planner behavior exactly.
+   - The mutable helper is the one actually used by the attempt-record write path.
+   - The duplicate const-return helper was removed, and no planner, event, PID, menu, or execution behavior was changed as part of this repair.
+
+3. Scope of v51.
+   - This is a compile-safety repair version of `v50`.
+   - The code, CSV, and summary were versioned forward together so the packaged set stays consistent.
+
+v52 finish confirmation repair
+------------------------------
+
+1. Finish is now allowed to complete the run from any active runtime phase.
+   - The previous runtime flow only confirmed `Finish` through the normal corridor-event gate.
+   - That meant finish could be seen by the classifier but still fail to stop the run if the robot was currently in a handling phase such as approach or corridor reacquire.
+
+2. Confirmed finish now immediately performs the full end-of-attempt flow.
+   - As soon as the finish geometry is confirmed:
+     - the motors stop
+     - the attempt timer is frozen
+     - the time is stored into the coherent attempt slot (`Right`, `Left`, or `Selection`)
+     - the start-confirmation screen opens again
+   - This makes the next-attempt menu update immediately with the timing from the just-finished trial.
+
+3. The normal event lockout behavior was preserved for non-finish events.
+   - Turn and junction events are still disabled during handling phases.
+   - Only `Finish` was made an explicit runtime exception so the run can terminate cleanly the moment finish is truly confirmed.
+
+4. Scope of v52.
+   - No menu layout or sensor mapping changes were made in this pass.
+   - The CSV was versioned forward unchanged because the fix is behavioral rather than a menu-structure change.
+
+v53 latched finish-interrupt repair
+-----------------------------------
+
+1. Finish now uses a latched runtime finish request.
+   - When finish is confirmed, the code now raises a dedicated boolean-style finish interrupt request instead of trying to complete the whole transition inline.
+   - The request captures the exact `millis()` timestamp at the moment finish is confirmed.
+
+2. Attempt time is now frozen from the finish trigger timestamp.
+   - The end-of-attempt save path now uses the latched finish timestamp instead of relying on a later `millis()` call.
+   - This guarantees the saved coherent attempt time corresponds to the actual finish trigger moment.
+
+3. The run loop now services the pending finish request before it can be overwritten.
+   - The original failure was not only finish recognition.
+   - The run loop still forced `RunScreen` after `updateExecutive()`, which could stomp on the freshly opened start-confirmation screen even after finish had already been handled.
+   - `v53` now services the pending finish request and only restores `RunScreen` if the run is genuinely still active afterward.
+
+4. Resulting finish flow.
+   - As soon as finish is confirmed:
+     - stop time is latched
+     - attempt time is saved into the correct `Right` / `Left` / `Selection` record
+     - `StartConfirm` opens again
+     - the updated previous-trial timing data is available immediately for the next attempt
+
+5. Scope of v53.
+   - No menu text or CSV structure changes were needed for this repair.
+   - This is a runtime control-flow hardening pass for finish handling only.
+
+v54 finish-arm gating repair
+----------------------------
+
+1. Finish classification now requires an explicit arm flag.
+   - Finish is no longer allowed to trigger from geometry alone.
+   - The finish candidate is only produced when a dedicated `finishArmed` state is true.
+   - This blocks false finish detections at the starting area and other open spaces that happen to look like finish geometry.
+
+2. Real attempts now start with finish disarmed.
+   - At the beginning of an actual run, finish is explicitly disabled.
+   - The flag is turned on only after a confirmed `T-Junction` event.
+   - When finish is finally confirmed, the flag is turned off again as part of the finish-request path.
+
+3. Event tests now manage finish arming separately.
+   - All event tests except the dedicated `T-Junction` test begin with finish already armed.
+   - The `T-Junction` test begins with finish disarmed so it follows the real progression more closely.
+   - After a test is stopped, the finish-arm flag is cleared again.
+
+4. Execution preview mirrors the same finish-arm behavior.
+   - The no-motor execution preview now also starts with finish disarmed.
+   - A confirmed preview `T-Junction` arms finish for later preview progression.
+   - This keeps the preview candidate display aligned with the actual runtime rule.
+
+5. Display paths were aligned with the new finish gate.
+   - The run screen, event-test run screen, sensor monitor, twin monitor, and execution preview now build their displayed event candidate using the same finish-arm state as the active flow.
+   - That prevents the OLED from showing a finish candidate that the runtime logic is intentionally blocking.
+
+6. Scope of v54.
+   - Existing 2-wall PID, IMU PID, and the latched finish-interrupt save path were left intact.
+   - This pass only adds the extra finish-trigger condition and the matching state management around it.

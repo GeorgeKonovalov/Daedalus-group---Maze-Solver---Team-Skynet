@@ -466,6 +466,7 @@ struct ExecutiveState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   uint32_t runStartedMs = 0;
@@ -479,6 +480,7 @@ struct EventTestState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   EventConfirmState eventConfirm;
@@ -492,12 +494,18 @@ struct PreviewState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   uint32_t startedMs = 0;
   uint32_t phaseStartedMs = 0;
   EventConfirmState eventConfirm;
   CorridorConfirmState corridorConfirm;
+};
+
+struct FinishInterruptState {
+  bool pending = false;
+  uint32_t stopMs = 0;
 };
 
 enum class TuneMotion : uint8_t {
@@ -542,6 +550,7 @@ PlannerState gPlanner;
 ExecutiveState gExecutive;
 EventTestState gEventTestRun;
 PreviewState gPreviewRun;
+FinishInterruptState gFinishInterrupt;
 PidRuntime gPid;
 PidRuntime gPid1WallSym;
 PidRuntime gPid1WallLeft;
@@ -658,7 +667,8 @@ float distanceForHeading(Heading heading);
 
 RelativeIrState relativeIrForHeading(uint8_t mask, Heading heading);
 PerceptionFrame buildPerceptionFrame(Heading heading);
-EventType classifyCandidateEvent(const PerceptionFrame& frame);
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed);
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed);
 bool corridorSignatureForFrame(const PerceptionFrame& frame);
 bool startSignatureForFrame(const PerceptionFrame& frame);
 PidSource choosePidSource(const PerceptionFrame& frame);
@@ -696,6 +706,10 @@ void followSmartForced(Heading heading, float forwardSpeed, PidSource forcedSour
 void beginExecution();
 void finishExecution();
 void updateExecutive();
+static void requestFinishInterrupt();
+static bool serviceFinishInterrupt();
+static void finishExecutionAt(uint32_t stopMs);
+static bool eventTestStartsWithFinishArmed(EventTestCase testCase);
 
 ButtonEvent readButtonEvent(bool allowInput);
 void openDigitEditor(const char* label, const char* unit, int* target, int minValue, int maxValue,
@@ -1191,15 +1205,6 @@ static AttemptRecord& plannerRecordForMode(RouteMode mode) {
   }
 }
 
-static const AttemptRecord& plannerRecordForMode(RouteMode mode) {
-  switch (mode) {
-    case RouteMode::Right:     return gPlanner.rightAttempt;
-    case RouteMode::Left:      return gPlanner.leftAttempt;
-    case RouteMode::Selection: return gPlanner.selectionAttempt;
-    default:                   return gPlanner.selectionAttempt;
-  }
-}
-
 static void clearAttemptRecord(AttemptRecord& record) {
   record.valid = false;
   record.hadDeadEnd = false;
@@ -1341,6 +1346,10 @@ EventType selectedEventTestTarget() {
     case EventTestCase::Back:
     default:                               return EventType::Idle;
   }
+}
+
+static bool eventTestStartsWithFinishArmed(EventTestCase testCase) {
+  return testCase != EventTestCase::TJunction;
 }
 
 PidSource pidSourceForTestMode(PidTestMode mode) {
@@ -1923,6 +1932,10 @@ bool startSignatureForFrame(const PerceptionFrame& frame) {
 }
 
 EventType classifyCandidateEvent(const PerceptionFrame& frame) {
+  return classifyCandidateEvent(frame, false);
+}
+
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed) {
   if (!frame.ultrasonicValid) {
     return EventType::SensorWait;
   }
@@ -1934,7 +1947,8 @@ EventType classifyCandidateEvent(const PerceptionFrame& frame) {
   bool rightWall = rightCm <= gCfg.corridorWallThresholdCm;
   bool frontClose = frontCm <= gCfg.turnDetectDistanceCm;
 
-  if (frontPairOpen(frame.ir) &&
+  if (finishArmed &&
+      frontPairOpen(frame.ir) &&
       rearPairOpen(frame.ir) &&
       frontCm >= gCfg.finishDistanceCm &&
       !leftWall &&
@@ -1975,6 +1989,10 @@ EventType classifyCandidateEvent(const PerceptionFrame& frame) {
 }
 
 PerceptionFrame buildPerceptionFrame(Heading heading) {
+  return buildPerceptionFrame(heading, false);
+}
+
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed) {
   PerceptionFrame frame;
   frame.ultrasonicValid = ultrasonicFresh();
   frame.ultrasonicSampleId = gUltrasonicSampleId;
@@ -2002,7 +2020,7 @@ PerceptionFrame buildPerceptionFrame(Heading heading) {
   frame.rightRaw = frame.right;
   frame.backRaw = frame.back;
 
-  frame.candidate = classifyCandidateEvent(frame);
+  frame.candidate = classifyCandidateEvent(frame, finishArmed);
   frame.corridorSignature = corridorSignatureForFrame(frame);
   frame.pidSource = choosePidSource(frame);
   return frame;
@@ -2553,6 +2571,9 @@ void beginExecution() {
   gPlanner.currentAttemptExecutionMode = executionMode;
   gPlanner.currentAttemptRecordMode = recordMode;
   gPlanner.currentAttemptHadDeadEnd = false;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
+  gExecutive.finishArmed = false;
   resetWallReference();
   gImuPidTestArmed = false;
 
@@ -2579,10 +2600,15 @@ void beginExecution() {
   gCurrentScreen = Screen::RunScreen;
 }
 
-void finishExecution() {
+static void finishExecutionAt(uint32_t stopMs) {
   stopAll();
 
-  uint32_t durationMs = millis() - gExecutive.runStartedMs;
+  uint32_t effectiveStopMs = stopMs;
+  if (effectiveStopMs < gExecutive.runStartedMs) {
+    effectiveStopMs = millis();
+  }
+
+  uint32_t durationMs = effectiveStopMs - gExecutive.runStartedMs;
   gPlanner.lastAttemptDurationMs = durationMs;
   AttemptRecord& record = plannerRecordForMode(gPlanner.currentAttemptRecordMode);
   record.valid = true;
@@ -2604,8 +2630,15 @@ void finishExecution() {
   gExecutive.state = NavState::Finished;
   gExecutive.displayEvent = EventType::Finish;
   gExecutive.latchedEvent = EventType::Finish;
+  gExecutive.finishArmed = false;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
 
   gCurrentScreen = Screen::StartConfirm;
+}
+
+void finishExecution() {
+  finishExecutionAt(millis());
 }
 
 static void enterPhase(NavState state, EventType displayEvent) {
@@ -2622,6 +2655,41 @@ static bool eventTriggersEnabledForState(NavState state) {
   // (approach / wait / reacquire), triggering stays disabled until corridor
   // operation resumes again.
   return state == NavState::Corridor;
+}
+
+static void requestFinishInterrupt() {
+  if (gFinishInterrupt.pending || !gExecutive.running) return;
+  gExecutive.finishArmed = false;
+  gFinishInterrupt.pending = true;
+  gFinishInterrupt.stopMs = millis();
+}
+
+static bool serviceFinishInterrupt() {
+  if (!gFinishInterrupt.pending) return false;
+  uint32_t stopMs = gFinishInterrupt.stopMs;
+  finishExecutionAt(stopMs);
+  return true;
+}
+
+static bool tryHandleRuntimeFinish(const PerceptionFrame& frame) {
+  // Finish is a special-case terminal event: once the finish geometry is
+  // truly confirmed, we should stop the timer, save the attempt result, and
+  // return to StartConfirm immediately even if we were in an event-handling
+  // phase. Other event types remain gated to corridor-driving only.
+  if (frame.candidate != EventType::Finish) {
+    if (!eventTriggersEnabledForState(gExecutive.state)) {
+      resetEventConfirmation();
+    }
+    return false;
+  }
+
+  EventType confirmed = EventType::Idle;
+  if (updateEventConfirmation(frame, confirmed) && confirmed == EventType::Finish) {
+    requestFinishInterrupt();
+    return true;
+  }
+
+  return false;
 }
 
 static void startPreviewPhase(NavState state, EventType displayEvent) {
@@ -2644,6 +2712,7 @@ void startPreviewExecution() {
   gPreviewRun.heading = headingFromIndex(activeSettings.startHeadingIndex);
   gPreviewHeading = gPreviewRun.heading;
   gPreviewRun.pendingHeading = gPreviewRun.heading;
+  gPreviewRun.finishArmed = false;
   gPreviewRun.displayEvent = EventType::Start;
   gPreviewRun.latchedEvent = EventType::Start;
   gPreviewRun.startedMs = millis();
@@ -2665,7 +2734,7 @@ void updatePreviewExecution() {
     startPreviewExecution();
   }
 
-  PerceptionFrame frame = buildPerceptionFrame(gPreviewRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gPreviewRun.heading, gPreviewRun.finishArmed);
   gPreviewRun.displayEvent = frame.candidate;
 
   switch (gPreviewRun.state) {
@@ -2693,6 +2762,7 @@ void updatePreviewExecution() {
           updateEventConfirmState(gPreviewRun.eventConfirm, frame.candidate, confirmed)) {
         gPreviewRun.latchedEvent = confirmed;
         if (confirmed == EventType::Finish) {
+          gPreviewRun.finishArmed = false;
           startPreviewPhase(NavState::Finished, EventType::Finish);
           return;
         }
@@ -2710,6 +2780,9 @@ void updatePreviewExecution() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gPreviewRun.finishArmed = true;
+          }
           if (confirmed != EventType::TJunction) {
             gPreviewRun.pendingHeading = chooseHeadingForEvent(frame, confirmed, gPreviewRun.heading);
           }
@@ -2767,8 +2840,12 @@ void updatePreviewExecution() {
 void updateExecutive() {
   if (!gExecutive.running) return;
 
-  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading, gExecutive.finishArmed);
   gExecutive.displayEvent = frame.candidate;
+
+  if (tryHandleRuntimeFinish(frame)) {
+    return;
+  }
 
   switch (gExecutive.state) {
     case NavState::StartSeek:
@@ -2796,14 +2873,10 @@ void updateExecutive() {
       }
 
       EventType confirmed = EventType::Idle;
-      if (eventTriggersEnabledForState(gExecutive.state) &&
+      if (frame.candidate != EventType::Finish &&
+          eventTriggersEnabledForState(gExecutive.state) &&
           updateEventConfirmation(frame, confirmed)) {
         gExecutive.latchedEvent = confirmed;
-
-        if (confirmed == EventType::Finish) {
-          finishExecution();
-          return;
-        }
 
         if (confirmed == EventType::DeadEnd) {
           gPlanner.currentAttemptHadDeadEnd = true;
@@ -2822,6 +2895,9 @@ void updateExecutive() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gExecutive.finishArmed = true;
+          }
           if (confirmed != EventType::TJunction) {
             gExecutive.pendingHeading = chooseHeadingForEvent(frame, confirmed, gExecutive.heading);
           }
@@ -3027,6 +3103,7 @@ void startEventTestRun() {
   gEventTestRun.active = true;
   gEventTestRun.heading = currentEventTestHeading();
   gEventTestRun.pendingHeading = gEventTestRun.heading;
+  gEventTestRun.finishArmed = eventTestStartsWithFinishArmed(gSelectedEventTest);
   gEventTestRun.displayEvent = (gSelectedEventTest == EventTestCase::Start) ? EventType::Start : EventType::Corridor;
   gEventTestRun.latchedEvent = gEventTestRun.displayEvent;
   gEventTestRun.startedMs = millis();
@@ -3041,6 +3118,7 @@ void startEventTestRun() {
 void stopEventTestRun() {
   gEventTestRun.active = false;
   gEventTestRun.state = NavState::Idle;
+  gEventTestRun.finishArmed = false;
   stopAll();
 }
 
@@ -3792,7 +3870,7 @@ void handleMazeTestRunInput(int encoderDelta, ButtonEvent buttonEvent) {
 void updateEventTestRun() {
   if (!gEventTestRun.active) return;
 
-  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading, gEventTestRun.finishArmed);
   EventType target = selectedEventTestTarget();
 
   switch (gEventTestRun.state) {
@@ -3826,6 +3904,7 @@ void updateEventTestRun() {
           updateEventConfirmState(gEventTestRun.eventConfirm, observed, confirmed)) {
         gEventTestRun.latchedEvent = confirmed;
         if (confirmed == EventType::Finish) {
+          gEventTestRun.finishArmed = false;
           gEventTestRun.state = NavState::Finished;
           gEventTestRun.displayEvent = EventType::Finish;
           stopAll();
@@ -3845,6 +3924,9 @@ void updateEventTestRun() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gEventTestRun.finishArmed = true;
+          }
           if (confirmed == EventType::TJunction && gSelectedEventTest == EventTestCase::TJunction) {
             // Delay the actual route-memory/configured branch choice until the stop gate.
           } else if (confirmed != EventType::TJunction) {
@@ -4351,7 +4433,9 @@ void drawDetectionSettingsScreen() {
 
 void drawSensorMonitorScreen() {
   Heading heading = gExecutive.running ? gExecutive.heading : gPreviewHeading;
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  bool finishArmed = gExecutive.running ? gExecutive.finishArmed
+                                        : (gPreviewRun.active ? gPreviewRun.finishArmed : false);
+  PerceptionFrame frame = buildPerceptionFrame(heading, finishArmed);
 
   drawHeader("Sensor Monitor");
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4396,7 +4480,9 @@ static void drawTwinSideStubs(int left, int top, int right, int bottom, const Re
 
 void drawTwinMonitorScreen() {
   Heading heading = gExecutive.running ? gExecutive.heading : gPreviewHeading;
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  bool finishArmed = gExecutive.running ? gExecutive.finishArmed
+                                        : (gPreviewRun.active ? gPreviewRun.finishArmed : false);
+  PerceptionFrame frame = buildPerceptionFrame(heading, finishArmed);
 
   drawHeader(eventToString(frame.candidate));
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4626,7 +4712,7 @@ void drawEventTestConfigScreen() {
 
 void drawEventTestRunScreen() {
   drawHeader("Event Run");
-  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading, gEventTestRun.finishArmed);
   u8g2.setFont(u8g2_font_5x8_tr);
   char line[32];
   snprintf(line, sizeof(line), "Case:%s", eventTestCaseToString(gSelectedEventTest));
@@ -4694,7 +4780,7 @@ void drawMazeTestRunScreen() {
   const char* errorText = nullptr;
   bool startReady = planNextAttempt(executionMode, recordMode, errorText);
   Heading heading = gPreviewRun.active ? gPreviewRun.heading : headingFromIndex(activeSettings.startHeadingIndex);
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  PerceptionFrame frame = buildPerceptionFrame(heading, gPreviewRun.finishArmed);
 
   drawHeader("Execution Preview");
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4803,7 +4889,7 @@ void drawStartConfirmScreen() {
 }
 
 void drawRunScreen() {
-  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading, gExecutive.finishArmed);
   drawHeader("Execution");
   u8g2.setFont(u8g2_font_5x8_tr);
 
@@ -4937,11 +5023,22 @@ void loop() {
   }
   gEncoderStepCarry = combinedEncoderDelta;
 
+  if (serviceFinishInterrupt()) {
+    // The finish request forcefully saves the coherent attempt result and
+    // returns the UI to StartConfirm before any later loop branch can
+    // overwrite the screen state back to RunScreen.
+  }
+
   if (gExecutive.running) {
     refreshSensors();
     (void)readButtonEvent(false);
     updateExecutive();
-    gCurrentScreen = Screen::RunScreen;
+    if (serviceFinishInterrupt()) {
+      // Finish was confirmed during updateExecutive(); leave the freshly
+      // stored attempt result and StartConfirm screen intact.
+    } else if (gExecutive.running) {
+      gCurrentScreen = Screen::RunScreen;
+    }
   } else if (gCurrentScreen == Screen::PIDTest) {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handlePidTestInput(encoderDelta, buttonEvent);

@@ -1191,15 +1191,6 @@ static AttemptRecord& plannerRecordForMode(RouteMode mode) {
   }
 }
 
-static const AttemptRecord& plannerRecordForMode(RouteMode mode) {
-  switch (mode) {
-    case RouteMode::Right:     return gPlanner.rightAttempt;
-    case RouteMode::Left:      return gPlanner.leftAttempt;
-    case RouteMode::Selection: return gPlanner.selectionAttempt;
-    default:                   return gPlanner.selectionAttempt;
-  }
-}
-
 static void clearAttemptRecord(AttemptRecord& record) {
   record.valid = false;
   record.hadDeadEnd = false;
@@ -2624,6 +2615,27 @@ static bool eventTriggersEnabledForState(NavState state) {
   return state == NavState::Corridor;
 }
 
+static bool tryHandleRuntimeFinish(const PerceptionFrame& frame) {
+  // Finish is a special-case terminal event: once the finish geometry is
+  // truly confirmed, we should stop the timer, save the attempt result, and
+  // return to StartConfirm immediately even if we were in an event-handling
+  // phase. Other event types remain gated to corridor-driving only.
+  if (frame.candidate != EventType::Finish) {
+    if (!eventTriggersEnabledForState(gExecutive.state)) {
+      resetEventConfirmation();
+    }
+    return false;
+  }
+
+  EventType confirmed = EventType::Idle;
+  if (updateEventConfirmation(frame, confirmed) && confirmed == EventType::Finish) {
+    finishExecution();
+    return true;
+  }
+
+  return false;
+}
+
 static void startPreviewPhase(NavState state, EventType displayEvent) {
   gPreviewRun.state = state;
   gPreviewRun.displayEvent = displayEvent;
@@ -2770,6 +2782,10 @@ void updateExecutive() {
   PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
   gExecutive.displayEvent = frame.candidate;
 
+  if (tryHandleRuntimeFinish(frame)) {
+    return;
+  }
+
   switch (gExecutive.state) {
     case NavState::StartSeek:
       gExecutive.displayEvent = EventType::Start;
@@ -2796,14 +2812,10 @@ void updateExecutive() {
       }
 
       EventType confirmed = EventType::Idle;
-      if (eventTriggersEnabledForState(gExecutive.state) &&
+      if (frame.candidate != EventType::Finish &&
+          eventTriggersEnabledForState(gExecutive.state) &&
           updateEventConfirmation(frame, confirmed)) {
         gExecutive.latchedEvent = confirmed;
-
-        if (confirmed == EventType::Finish) {
-          finishExecution();
-          return;
-        }
 
         if (confirmed == EventType::DeadEnd) {
           gPlanner.currentAttemptHadDeadEnd = true;

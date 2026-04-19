@@ -1191,15 +1191,6 @@ static AttemptRecord& plannerRecordForMode(RouteMode mode) {
   }
 }
 
-static const AttemptRecord& plannerRecordForMode(RouteMode mode) {
-  switch (mode) {
-    case RouteMode::Right:     return gPlanner.rightAttempt;
-    case RouteMode::Left:      return gPlanner.leftAttempt;
-    case RouteMode::Selection: return gPlanner.selectionAttempt;
-    default:                   return gPlanner.selectionAttempt;
-  }
-}
-
 static void clearAttemptRecord(AttemptRecord& record) {
   record.valid = false;
   record.hadDeadEnd = false;

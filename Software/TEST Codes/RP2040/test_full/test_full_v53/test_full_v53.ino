@@ -500,6 +500,11 @@ struct PreviewState {
   CorridorConfirmState corridorConfirm;
 };
 
+struct FinishInterruptState {
+  bool pending = false;
+  uint32_t stopMs = 0;
+};
+
 enum class TuneMotion : uint8_t {
   Stop,
   North,
@@ -542,6 +547,7 @@ PlannerState gPlanner;
 ExecutiveState gExecutive;
 EventTestState gEventTestRun;
 PreviewState gPreviewRun;
+FinishInterruptState gFinishInterrupt;
 PidRuntime gPid;
 PidRuntime gPid1WallSym;
 PidRuntime gPid1WallLeft;
@@ -696,6 +702,9 @@ void followSmartForced(Heading heading, float forwardSpeed, PidSource forcedSour
 void beginExecution();
 void finishExecution();
 void updateExecutive();
+static void requestFinishInterrupt();
+static bool serviceFinishInterrupt();
+static void finishExecutionAt(uint32_t stopMs);
 
 ButtonEvent readButtonEvent(bool allowInput);
 void openDigitEditor(const char* label, const char* unit, int* target, int minValue, int maxValue,
@@ -1183,15 +1192,6 @@ const char* pidSourceToString(PidSource source) {
 }
 
 static AttemptRecord& plannerRecordForMode(RouteMode mode) {
-  switch (mode) {
-    case RouteMode::Right:     return gPlanner.rightAttempt;
-    case RouteMode::Left:      return gPlanner.leftAttempt;
-    case RouteMode::Selection: return gPlanner.selectionAttempt;
-    default:                   return gPlanner.selectionAttempt;
-  }
-}
-
-static const AttemptRecord& plannerRecordForMode(RouteMode mode) {
   switch (mode) {
     case RouteMode::Right:     return gPlanner.rightAttempt;
     case RouteMode::Left:      return gPlanner.leftAttempt;
@@ -2553,6 +2553,8 @@ void beginExecution() {
   gPlanner.currentAttemptExecutionMode = executionMode;
   gPlanner.currentAttemptRecordMode = recordMode;
   gPlanner.currentAttemptHadDeadEnd = false;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
   resetWallReference();
   gImuPidTestArmed = false;
 
@@ -2579,10 +2581,15 @@ void beginExecution() {
   gCurrentScreen = Screen::RunScreen;
 }
 
-void finishExecution() {
+static void finishExecutionAt(uint32_t stopMs) {
   stopAll();
 
-  uint32_t durationMs = millis() - gExecutive.runStartedMs;
+  uint32_t effectiveStopMs = stopMs;
+  if (effectiveStopMs < gExecutive.runStartedMs) {
+    effectiveStopMs = millis();
+  }
+
+  uint32_t durationMs = effectiveStopMs - gExecutive.runStartedMs;
   gPlanner.lastAttemptDurationMs = durationMs;
   AttemptRecord& record = plannerRecordForMode(gPlanner.currentAttemptRecordMode);
   record.valid = true;
@@ -2604,8 +2611,14 @@ void finishExecution() {
   gExecutive.state = NavState::Finished;
   gExecutive.displayEvent = EventType::Finish;
   gExecutive.latchedEvent = EventType::Finish;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
 
   gCurrentScreen = Screen::StartConfirm;
+}
+
+void finishExecution() {
+  finishExecutionAt(millis());
 }
 
 static void enterPhase(NavState state, EventType displayEvent) {
@@ -2622,6 +2635,40 @@ static bool eventTriggersEnabledForState(NavState state) {
   // (approach / wait / reacquire), triggering stays disabled until corridor
   // operation resumes again.
   return state == NavState::Corridor;
+}
+
+static void requestFinishInterrupt() {
+  if (gFinishInterrupt.pending || !gExecutive.running) return;
+  gFinishInterrupt.pending = true;
+  gFinishInterrupt.stopMs = millis();
+}
+
+static bool serviceFinishInterrupt() {
+  if (!gFinishInterrupt.pending) return false;
+  uint32_t stopMs = gFinishInterrupt.stopMs;
+  finishExecutionAt(stopMs);
+  return true;
+}
+
+static bool tryHandleRuntimeFinish(const PerceptionFrame& frame) {
+  // Finish is a special-case terminal event: once the finish geometry is
+  // truly confirmed, we should stop the timer, save the attempt result, and
+  // return to StartConfirm immediately even if we were in an event-handling
+  // phase. Other event types remain gated to corridor-driving only.
+  if (frame.candidate != EventType::Finish) {
+    if (!eventTriggersEnabledForState(gExecutive.state)) {
+      resetEventConfirmation();
+    }
+    return false;
+  }
+
+  EventType confirmed = EventType::Idle;
+  if (updateEventConfirmation(frame, confirmed) && confirmed == EventType::Finish) {
+    requestFinishInterrupt();
+    return true;
+  }
+
+  return false;
 }
 
 static void startPreviewPhase(NavState state, EventType displayEvent) {
@@ -2770,6 +2817,10 @@ void updateExecutive() {
   PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
   gExecutive.displayEvent = frame.candidate;
 
+  if (tryHandleRuntimeFinish(frame)) {
+    return;
+  }
+
   switch (gExecutive.state) {
     case NavState::StartSeek:
       gExecutive.displayEvent = EventType::Start;
@@ -2796,14 +2847,10 @@ void updateExecutive() {
       }
 
       EventType confirmed = EventType::Idle;
-      if (eventTriggersEnabledForState(gExecutive.state) &&
+      if (frame.candidate != EventType::Finish &&
+          eventTriggersEnabledForState(gExecutive.state) &&
           updateEventConfirmation(frame, confirmed)) {
         gExecutive.latchedEvent = confirmed;
-
-        if (confirmed == EventType::Finish) {
-          finishExecution();
-          return;
-        }
 
         if (confirmed == EventType::DeadEnd) {
           gPlanner.currentAttemptHadDeadEnd = true;
@@ -4937,11 +4984,22 @@ void loop() {
   }
   gEncoderStepCarry = combinedEncoderDelta;
 
+  if (serviceFinishInterrupt()) {
+    // The finish request forcefully saves the coherent attempt result and
+    // returns the UI to StartConfirm before any later loop branch can
+    // overwrite the screen state back to RunScreen.
+  }
+
   if (gExecutive.running) {
     refreshSensors();
     (void)readButtonEvent(false);
     updateExecutive();
-    gCurrentScreen = Screen::RunScreen;
+    if (serviceFinishInterrupt()) {
+      // Finish was confirmed during updateExecutive(); leave the freshly
+      // stored attempt result and StartConfirm screen intact.
+    } else if (gExecutive.running) {
+      gCurrentScreen = Screen::RunScreen;
+    }
   } else if (gCurrentScreen == Screen::PIDTest) {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handlePidTestInput(encoderDelta, buttonEvent);

@@ -82,20 +82,20 @@ struct RuntimeSettings {
   uint8_t wallPidEnabled = 1;
   uint8_t pid1WallSymmetryEnabled = 1;
   int pidDeadband1W_x100 = 60;
-  int p_x1000 = 500;
-  int i_x1000 = 0;     //   
-  int d_x1000 = 0;     //   
-  int pid1WallP_x1000 = 500;
-  int pid1WallI_x1000 = 0;
-  int pid1WallD_x1000 = 0;
-  int pid1WallRightP_x1000 = 500;
-  int pid1WallRightI_x1000 = 0;
-  int pid1WallRightD_x1000 = 0;
+  int p_x1000 = 400;
+  int i_x1000 = 50;     //   
+  int d_x1000 = 200;     //   
+  int pid1WallP_x1000 = 400;
+  int pid1WallI_x1000 = 50;
+  int pid1WallD_x1000 = 200;
+  int pid1WallRightP_x1000 = 400;
+  int pid1WallRightI_x1000 = 50;
+  int pid1WallRightD_x1000 = 200;
   // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
   uint8_t imuEnabled = 1;
   int imuSign_x100 = -100;
-  int imuP_x10000 = 50;
-  int imuI_x10000 = 0;
+  int imuP_x10000 = 19000;
+  int imuI_x10000 = 7000;
   int imuD_x10000 = 0;
   int imuAngleThreshold_x100 = 100;
   int imuPidTestYawError_x100 = 300;
@@ -112,14 +112,14 @@ struct RuntimeSettings {
   int leftDriveScale_x100 = 100;
   int rightDriveScale_x100 = 100;
 
-  int frontStopDistance_x100 = 400;
+  int frontStopDistance_x100 = 600;
   int corridorWallThreshold_x100 = 1600;
   int turnDetectDistance_x100 = 2600;
   int deadEndDistance_x100 = 1600;
   int finishDistance_x100 = 3000;
   int sensingInterval_x100 = 10;
   int eventConfirmCount = 3;
-  int ultrasonicAvgCount = 5;
+  int ultrasonicAvgCount = 3;
   int waitBeforeTurn_x100 = 500;
 
   uint8_t routeMode = 1;
@@ -378,6 +378,9 @@ enum class EventConfigField : uint8_t {
   Back
 };
 
+constexpr int EVENT_CONFIG_FIELD_COUNT = (int)EventConfigField::Back + 1;
+constexpr size_t EVENT_CONFIG_TEXT_SIZE = 32;
+
 struct EventTestConfig {
   uint8_t headingIndex = 0;
   TurnChoice turnChoice = TurnChoice::Left;
@@ -466,6 +469,9 @@ struct ExecutiveState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
+  bool tJunctionRaised = false;
+  bool deadEndRaised = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   uint32_t runStartedMs = 0;
@@ -479,6 +485,9 @@ struct EventTestState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
+  bool tJunctionRaised = false;
+  bool deadEndRaised = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   EventConfirmState eventConfirm;
@@ -492,12 +501,20 @@ struct PreviewState {
   NavState state = NavState::Idle;
   Heading heading = Heading::North;
   Heading pendingHeading = Heading::North;
+  bool finishArmed = false;
+  bool tJunctionRaised = false;
+  bool deadEndRaised = false;
   EventType displayEvent = EventType::Idle;
   EventType latchedEvent = EventType::Idle;
   uint32_t startedMs = 0;
   uint32_t phaseStartedMs = 0;
   EventConfirmState eventConfirm;
   CorridorConfirmState corridorConfirm;
+};
+
+struct FinishInterruptState {
+  bool pending = false;
+  uint32_t stopMs = 0;
 };
 
 enum class TuneMotion : uint8_t {
@@ -542,6 +559,7 @@ PlannerState gPlanner;
 ExecutiveState gExecutive;
 EventTestState gEventTestRun;
 PreviewState gPreviewRun;
+FinishInterruptState gFinishInterrupt;
 PidRuntime gPid;
 PidRuntime gPid1WallSym;
 PidRuntime gPid1WallLeft;
@@ -638,6 +656,7 @@ void readIRSensors();
 void initImu();
 void updateImu();
 bool captureImuReference();
+bool reanchorImuReferenceToCurrentHeading();
 void updateImuDerivedState();
 float imuReferenceAngleToleranceDeg(float captureDurationS);
 float imuPlanarAngleToleranceDeg(uint16_t sampleCount, float avgAz);
@@ -658,7 +677,10 @@ float distanceForHeading(Heading heading);
 
 RelativeIrState relativeIrForHeading(uint8_t mask, Heading heading);
 PerceptionFrame buildPerceptionFrame(Heading heading);
-EventType classifyCandidateEvent(const PerceptionFrame& frame);
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed);
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed, bool tJunctionStraightArmed);
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed);
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed, bool tJunctionStraightArmed);
 bool corridorSignatureForFrame(const PerceptionFrame& frame);
 bool startSignatureForFrame(const PerceptionFrame& frame);
 PidSource choosePidSource(const PerceptionFrame& frame);
@@ -687,6 +709,7 @@ float computeWallCorrection(const PerceptionFrame& frame, PidSource source);
 void resetWallReference();
 void updateWallReference(const PerceptionFrame& frame);
 PidSource stabilizedPidSource(const PerceptionFrame& frame, PidSource previousSource);
+void handleNoWallImuTransition(PidSource previousSource, PidSource nextSource);
 void writeServoCommand(Servo& servo, int stopAngle, int rangeAngle, int invert, float cmd);
 void stopAll();
 void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Heading heading);
@@ -696,6 +719,11 @@ void followSmartForced(Heading heading, float forwardSpeed, PidSource forcedSour
 void beginExecution();
 void finishExecution();
 void updateExecutive();
+static void requestFinishInterrupt();
+static bool serviceFinishInterrupt();
+static void finishExecutionAt(uint32_t stopMs);
+static bool eventTestStartsWithFinishArmed(EventTestCase testCase);
+static bool eventTestStartsWithTJunctionStraightArmed(EventTestCase testCase);
 
 ButtonEvent readButtonEvent(bool allowInput);
 void openDigitEditor(const char* label, const char* unit, int* target, int minValue, int maxValue,
@@ -749,6 +777,7 @@ void formatPlannerAttemptLine(char* buffer, size_t size, const char* label, cons
 static bool eventConfigFieldRelevant(EventTestCase testCase, EventConfigField field);
 static int currentEventConfigItemCount();
 static EventConfigField currentEventConfigFieldAt(int selectedIndex);
+static int normalizeEventTestConfigIndex(int requestedIndex);
 static const char* eventConfigDesc1(EventConfigField field);
 static const char* eventConfigDesc2(EventConfigField field);
 static void eventConfigFieldText(EventConfigField field, char* buffer, size_t size);
@@ -1036,6 +1065,21 @@ PidSource stabilizedPidSource(const PerceptionFrame& frame, PidSource previousSo
   return PidSource::None;
 }
 
+void handleNoWallImuTransition(PidSource previousSource, PidSource nextSource) {
+  if (nextSource != PidSource::None || previousSource == PidSource::None) {
+    return;
+  }
+
+  if (!imuUsageEnabled()) {
+    return;
+  }
+
+  // When side walls disappear, keep moving forward but re-anchor yaw hold to the
+  // current travel direction once so IMU-only control maintains the heading that
+  // was active at the moment we entered the no-wall corridor/open-space case.
+  (void)reanchorImuReferenceToCurrentHeading();
+}
+
 bool wallPidUsageEnabled() {
   return gCfg.wallPidEnabled;
 }
@@ -1191,15 +1235,6 @@ static AttemptRecord& plannerRecordForMode(RouteMode mode) {
   }
 }
 
-static const AttemptRecord& plannerRecordForMode(RouteMode mode) {
-  switch (mode) {
-    case RouteMode::Right:     return gPlanner.rightAttempt;
-    case RouteMode::Left:      return gPlanner.leftAttempt;
-    case RouteMode::Selection: return gPlanner.selectionAttempt;
-    default:                   return gPlanner.selectionAttempt;
-  }
-}
-
 static void clearAttemptRecord(AttemptRecord& record) {
   record.valid = false;
   record.hadDeadEnd = false;
@@ -1341,6 +1376,14 @@ EventType selectedEventTestTarget() {
     case EventTestCase::Back:
     default:                               return EventType::Idle;
   }
+}
+
+static bool eventTestStartsWithFinishArmed(EventTestCase testCase) {
+  return testCase != EventTestCase::TJunction;
+}
+
+static bool eventTestStartsWithTJunctionStraightArmed(EventTestCase testCase) {
+  return testCase == EventTestCase::TJunctionStraight;
 }
 
 PidSource pidSourceForTestMode(PidTestMode mode) {
@@ -1855,6 +1898,31 @@ bool captureImuReference() {
   return true;
 }
 
+bool reanchorImuReferenceToCurrentHeading() {
+  if (!imuUsageEnabled()) return false;
+
+  updateImuDerivedState();
+
+  gImu.reference.avgAx = gImu.ax;
+  gImu.reference.avgAy = gImu.ay;
+  gImu.reference.avgAz = gImu.az;
+  gImu.reference.yawDeg = gImu.yawDeg;
+  yawAxisForAngle(gImu.reference.yawDeg, gImu.reference.xAxisX, gImu.reference.xAxisY);
+  gImu.reference.yAxisX = -gImu.reference.xAxisY;
+  gImu.reference.yAxisY = gImu.reference.xAxisX;
+  if (!gImu.referenceValid) {
+    gImu.reference.planarTolG = 0.0f;
+    gImu.reference.angleTolDeg = imuMeasurementAngleToleranceDeg(0.0f, gImu.sampleDtS);
+  }
+  gImu.reference.valid = true;
+  gImu.referenceValid = true;
+
+  resetImuPid();
+  holdImuCompensation(IMU_REANCHOR_HOLD_S);
+  updateImuDerivedState();
+  return true;
+}
+
 void refreshSensors() {
   readIRSensors();
   serviceUartSensorStream();
@@ -1893,6 +1961,10 @@ static bool rearPairOpen(const RelativeIrState& ir) {
   return !ir.rearLeft && !ir.rearRight;
 }
 
+static bool tJunctionStraightReady(bool tJunctionRaised, bool deadEndRaised) {
+  return tJunctionRaised && deadEndRaised;
+}
+
 PidSource choosePidSource(const PerceptionFrame& frame) {
   // The displayed source uses the same averaged ultrasonic geometry as the
   // runtime event and wall-following logic. The live controller still adds
@@ -1923,6 +1995,14 @@ bool startSignatureForFrame(const PerceptionFrame& frame) {
 }
 
 EventType classifyCandidateEvent(const PerceptionFrame& frame) {
+  return classifyCandidateEvent(frame, false, false);
+}
+
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed) {
+  return classifyCandidateEvent(frame, finishArmed, false);
+}
+
+EventType classifyCandidateEvent(const PerceptionFrame& frame, bool finishArmed, bool tJunctionStraightArmed) {
   if (!frame.ultrasonicValid) {
     return EventType::SensorWait;
   }
@@ -1934,7 +2014,8 @@ EventType classifyCandidateEvent(const PerceptionFrame& frame) {
   bool rightWall = rightCm <= gCfg.corridorWallThresholdCm;
   bool frontClose = frontCm <= gCfg.turnDetectDistanceCm;
 
-  if (frontPairOpen(frame.ir) &&
+  if (finishArmed &&
+      frontPairOpen(frame.ir) &&
       rearPairOpen(frame.ir) &&
       frontCm >= gCfg.finishDistanceCm &&
       !leftWall &&
@@ -1967,7 +2048,9 @@ EventType classifyCandidateEvent(const PerceptionFrame& frame) {
     return EventType::TJunction;
   }
 
-  if ((!leftWall || !rightWall) && frontCm > gCfg.turnDetectDistanceCm) {
+  if (tJunctionStraightArmed &&
+      (!leftWall || !rightWall) &&
+      frontCm > gCfg.turnDetectDistanceCm) {
     return EventType::TJunctionStraight;
   }
 
@@ -1975,6 +2058,14 @@ EventType classifyCandidateEvent(const PerceptionFrame& frame) {
 }
 
 PerceptionFrame buildPerceptionFrame(Heading heading) {
+  return buildPerceptionFrame(heading, false, false);
+}
+
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed) {
+  return buildPerceptionFrame(heading, finishArmed, false);
+}
+
+PerceptionFrame buildPerceptionFrame(Heading heading, bool finishArmed, bool tJunctionStraightArmed) {
   PerceptionFrame frame;
   frame.ultrasonicValid = ultrasonicFresh();
   frame.ultrasonicSampleId = gUltrasonicSampleId;
@@ -2002,7 +2093,7 @@ PerceptionFrame buildPerceptionFrame(Heading heading) {
   frame.rightRaw = frame.right;
   frame.backRaw = frame.back;
 
-  frame.candidate = classifyCandidateEvent(frame);
+  frame.candidate = classifyCandidateEvent(frame, finishArmed, tJunctionStraightArmed);
   frame.corridorSignature = corridorSignatureForFrame(frame);
   frame.pidSource = choosePidSource(frame);
   return frame;
@@ -2500,7 +2591,9 @@ void followSmart(Heading heading, float forwardSpeed) {
   }
 
   updateWallReference(frame);
+  PidSource previousSource = gActivePidSource;
   PidSource controlSource = stabilizedPidSource(frame, gActivePidSource);
+  handleNoWallImuTransition(previousSource, controlSource);
   if (controlSource != gActivePidSource) {
     gActivePidSource = controlSource;
     resetAllWallPidRuntimes();
@@ -2519,6 +2612,8 @@ void followSmartForced(Heading heading, float forwardSpeed, PidSource forcedSour
     return;
   }
 
+  PidSource previousSource = gActivePidSource;
+  handleNoWallImuTransition(previousSource, forcedSource);
   if (forcedSource != gActivePidSource) {
     gActivePidSource = forcedSource;
     resetAllWallPidRuntimes();
@@ -2553,6 +2648,11 @@ void beginExecution() {
   gPlanner.currentAttemptExecutionMode = executionMode;
   gPlanner.currentAttemptRecordMode = recordMode;
   gPlanner.currentAttemptHadDeadEnd = false;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
+  gExecutive.finishArmed = false;
+  gExecutive.tJunctionRaised = false;
+  gExecutive.deadEndRaised = false;
   resetWallReference();
   gImuPidTestArmed = false;
 
@@ -2579,10 +2679,15 @@ void beginExecution() {
   gCurrentScreen = Screen::RunScreen;
 }
 
-void finishExecution() {
+static void finishExecutionAt(uint32_t stopMs) {
   stopAll();
 
-  uint32_t durationMs = millis() - gExecutive.runStartedMs;
+  uint32_t effectiveStopMs = stopMs;
+  if (effectiveStopMs < gExecutive.runStartedMs) {
+    effectiveStopMs = millis();
+  }
+
+  uint32_t durationMs = effectiveStopMs - gExecutive.runStartedMs;
   gPlanner.lastAttemptDurationMs = durationMs;
   AttemptRecord& record = plannerRecordForMode(gPlanner.currentAttemptRecordMode);
   record.valid = true;
@@ -2604,8 +2709,17 @@ void finishExecution() {
   gExecutive.state = NavState::Finished;
   gExecutive.displayEvent = EventType::Finish;
   gExecutive.latchedEvent = EventType::Finish;
+  gExecutive.finishArmed = false;
+  gExecutive.tJunctionRaised = false;
+  gExecutive.deadEndRaised = false;
+  gFinishInterrupt.pending = false;
+  gFinishInterrupt.stopMs = 0;
 
   gCurrentScreen = Screen::StartConfirm;
+}
+
+void finishExecution() {
+  finishExecutionAt(millis());
 }
 
 static void enterPhase(NavState state, EventType displayEvent) {
@@ -2622,6 +2736,41 @@ static bool eventTriggersEnabledForState(NavState state) {
   // (approach / wait / reacquire), triggering stays disabled until corridor
   // operation resumes again.
   return state == NavState::Corridor;
+}
+
+static void requestFinishInterrupt() {
+  if (gFinishInterrupt.pending || !gExecutive.running) return;
+  gExecutive.finishArmed = false;
+  gFinishInterrupt.pending = true;
+  gFinishInterrupt.stopMs = millis();
+}
+
+static bool serviceFinishInterrupt() {
+  if (!gFinishInterrupt.pending) return false;
+  uint32_t stopMs = gFinishInterrupt.stopMs;
+  finishExecutionAt(stopMs);
+  return true;
+}
+
+static bool tryHandleRuntimeFinish(const PerceptionFrame& frame) {
+  // Finish is a special-case terminal event: once the finish geometry is
+  // truly confirmed, we should stop the timer, save the attempt result, and
+  // return to StartConfirm immediately even if we were in an event-handling
+  // phase. Other event types remain gated to corridor-driving only.
+  if (frame.candidate != EventType::Finish) {
+    if (!eventTriggersEnabledForState(gExecutive.state)) {
+      resetEventConfirmation();
+    }
+    return false;
+  }
+
+  EventType confirmed = EventType::Idle;
+  if (updateEventConfirmation(frame, confirmed) && confirmed == EventType::Finish) {
+    requestFinishInterrupt();
+    return true;
+  }
+
+  return false;
 }
 
 static void startPreviewPhase(NavState state, EventType displayEvent) {
@@ -2644,6 +2793,9 @@ void startPreviewExecution() {
   gPreviewRun.heading = headingFromIndex(activeSettings.startHeadingIndex);
   gPreviewHeading = gPreviewRun.heading;
   gPreviewRun.pendingHeading = gPreviewRun.heading;
+  gPreviewRun.finishArmed = false;
+  gPreviewRun.tJunctionRaised = false;
+  gPreviewRun.deadEndRaised = false;
   gPreviewRun.displayEvent = EventType::Start;
   gPreviewRun.latchedEvent = EventType::Start;
   gPreviewRun.startedMs = millis();
@@ -2665,7 +2817,10 @@ void updatePreviewExecution() {
     startPreviewExecution();
   }
 
-  PerceptionFrame frame = buildPerceptionFrame(gPreviewRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gPreviewRun.heading,
+                                               gPreviewRun.finishArmed,
+                                               tJunctionStraightReady(gPreviewRun.tJunctionRaised,
+                                                                     gPreviewRun.deadEndRaised));
   gPreviewRun.displayEvent = frame.candidate;
 
   switch (gPreviewRun.state) {
@@ -2693,10 +2848,12 @@ void updatePreviewExecution() {
           updateEventConfirmState(gPreviewRun.eventConfirm, frame.candidate, confirmed)) {
         gPreviewRun.latchedEvent = confirmed;
         if (confirmed == EventType::Finish) {
+          gPreviewRun.finishArmed = false;
           startPreviewPhase(NavState::Finished, EventType::Finish);
           return;
         }
         if (confirmed == EventType::DeadEnd) {
+          gPreviewRun.deadEndRaised = true;
           gPreviewRun.pendingHeading = oppositeOf(gPreviewRun.heading);
           gPreviewRun.heading = gPreviewRun.pendingHeading;
           gPreviewHeading = gPreviewRun.heading;
@@ -2710,6 +2867,10 @@ void updatePreviewExecution() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gPreviewRun.finishArmed = true;
+            gPreviewRun.tJunctionRaised = true;
+          }
           if (confirmed != EventType::TJunction) {
             gPreviewRun.pendingHeading = chooseHeadingForEvent(frame, confirmed, gPreviewRun.heading);
           }
@@ -2767,8 +2928,15 @@ void updatePreviewExecution() {
 void updateExecutive() {
   if (!gExecutive.running) return;
 
-  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading,
+                                               gExecutive.finishArmed,
+                                               tJunctionStraightReady(gExecutive.tJunctionRaised,
+                                                                     gExecutive.deadEndRaised));
   gExecutive.displayEvent = frame.candidate;
+
+  if (tryHandleRuntimeFinish(frame)) {
+    return;
+  }
 
   switch (gExecutive.state) {
     case NavState::StartSeek:
@@ -2796,17 +2964,14 @@ void updateExecutive() {
       }
 
       EventType confirmed = EventType::Idle;
-      if (eventTriggersEnabledForState(gExecutive.state) &&
+      if (frame.candidate != EventType::Finish &&
+          eventTriggersEnabledForState(gExecutive.state) &&
           updateEventConfirmation(frame, confirmed)) {
         gExecutive.latchedEvent = confirmed;
 
-        if (confirmed == EventType::Finish) {
-          finishExecution();
-          return;
-        }
-
         if (confirmed == EventType::DeadEnd) {
           gPlanner.currentAttemptHadDeadEnd = true;
+          gExecutive.deadEndRaised = true;
           gExecutive.pendingHeading = oppositeOf(gExecutive.heading);
           gExecutive.heading = gExecutive.pendingHeading;
           resetDrivePidControl();
@@ -2822,6 +2987,10 @@ void updateExecutive() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gExecutive.finishArmed = true;
+            gExecutive.tJunctionRaised = true;
+          }
           if (confirmed != EventType::TJunction) {
             gExecutive.pendingHeading = chooseHeadingForEvent(frame, confirmed, gExecutive.heading);
           }
@@ -3027,6 +3196,9 @@ void startEventTestRun() {
   gEventTestRun.active = true;
   gEventTestRun.heading = currentEventTestHeading();
   gEventTestRun.pendingHeading = gEventTestRun.heading;
+  gEventTestRun.finishArmed = eventTestStartsWithFinishArmed(gSelectedEventTest);
+  gEventTestRun.tJunctionRaised = eventTestStartsWithTJunctionStraightArmed(gSelectedEventTest);
+  gEventTestRun.deadEndRaised = eventTestStartsWithTJunctionStraightArmed(gSelectedEventTest);
   gEventTestRun.displayEvent = (gSelectedEventTest == EventTestCase::Start) ? EventType::Start : EventType::Corridor;
   gEventTestRun.latchedEvent = gEventTestRun.displayEvent;
   gEventTestRun.startedMs = millis();
@@ -3041,6 +3213,9 @@ void startEventTestRun() {
 void stopEventTestRun() {
   gEventTestRun.active = false;
   gEventTestRun.state = NavState::Idle;
+  gEventTestRun.finishArmed = false;
+  gEventTestRun.tJunctionRaised = false;
+  gEventTestRun.deadEndRaised = false;
   stopAll();
 }
 
@@ -3477,6 +3652,14 @@ static EventConfigField currentEventConfigFieldAt(int selectedIndex) {
   return EventConfigField::Back;
 }
 
+static int normalizeEventTestConfigIndex(int requestedIndex) {
+  int itemCount = currentEventConfigItemCount();
+  if (itemCount <= 0) return 0;
+  if (requestedIndex < 0) return 0;
+  if (requestedIndex >= itemCount) return itemCount - 1;
+  return requestedIndex;
+}
+
 static const char* eventConfigDesc1(EventConfigField field) {
   switch (field) {
     case EventConfigField::Heading: return "Robot heading for";
@@ -3583,7 +3766,7 @@ void handleEventTestMenuInput(int encoderDelta, ButtonEvent buttonEvent) {
   if (gSelectedEventTest == EventTestCase::Back) {
     gCurrentScreen = Screen::Root;
   } else {
-    gEventTestConfigIndex = 0;
+    gEventTestConfigIndex = normalizeEventTestConfigIndex(0);
     gCurrentScreen = Screen::EventTestConfig;
   }
 }
@@ -3606,11 +3789,9 @@ void handleImuYawTestInput(ButtonEvent buttonEvent) {
 }
 
 void handleEventTestConfigInput(int encoderDelta, ButtonEvent buttonEvent) {
-  int itemCount = currentEventConfigItemCount();
+  gEventTestConfigIndex = normalizeEventTestConfigIndex(gEventTestConfigIndex);
   if (encoderDelta != 0) {
-    gEventTestConfigIndex += encoderDelta;
-    if (gEventTestConfigIndex < 0) gEventTestConfigIndex = 0;
-    if (gEventTestConfigIndex >= itemCount) gEventTestConfigIndex = itemCount - 1;
+    gEventTestConfigIndex = normalizeEventTestConfigIndex(gEventTestConfigIndex + encoderDelta);
   }
   if (buttonEvent == ButtonEvent::LongPress) {
     gCurrentScreen = Screen::EventTestMenu;
@@ -3659,9 +3840,7 @@ void handleEventTestConfigInput(int encoderDelta, ButtonEvent buttonEvent) {
     case EventConfigField::OneWallSymmetry:
       workingSettings.pid1WallSymmetryEnabled = workingSettings.pid1WallSymmetryEnabled ? 0 : 1;
       commitRuntimeConfig();
-      if (gEventTestConfigIndex >= currentEventConfigItemCount()) {
-        gEventTestConfigIndex = currentEventConfigItemCount() - 1;
-      }
+      gEventTestConfigIndex = normalizeEventTestConfigIndex(gEventTestConfigIndex);
       break;
     case EventConfigField::WallP:
       openDigitEditor("2W P", "x", &workingSettings.p_x1000, 0, 9999, eventConfigDesc1(EventConfigField::WallP), eventConfigDesc2(EventConfigField::WallP), Screen::EventTestConfig, 1, 3);
@@ -3751,6 +3930,7 @@ void handleEventTestConfigInput(int encoderDelta, ButtonEvent buttonEvent) {
 void handleEventTestRunInput(ButtonEvent buttonEvent) {
   if (buttonEvent == ButtonEvent::LongPress) {
     stopEventTestRun();
+    gEventTestConfigIndex = normalizeEventTestConfigIndex(gEventTestConfigIndex);
     gCurrentScreen = Screen::EventTestConfig;
   }
 }
@@ -3792,7 +3972,10 @@ void handleMazeTestRunInput(int encoderDelta, ButtonEvent buttonEvent) {
 void updateEventTestRun() {
   if (!gEventTestRun.active) return;
 
-  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading,
+                                               gEventTestRun.finishArmed,
+                                               tJunctionStraightReady(gEventTestRun.tJunctionRaised,
+                                                                     gEventTestRun.deadEndRaised));
   EventType target = selectedEventTestTarget();
 
   switch (gEventTestRun.state) {
@@ -3826,12 +4009,14 @@ void updateEventTestRun() {
           updateEventConfirmState(gEventTestRun.eventConfirm, observed, confirmed)) {
         gEventTestRun.latchedEvent = confirmed;
         if (confirmed == EventType::Finish) {
+          gEventTestRun.finishArmed = false;
           gEventTestRun.state = NavState::Finished;
           gEventTestRun.displayEvent = EventType::Finish;
           stopAll();
           return;
         }
         if (confirmed == EventType::DeadEnd) {
+          gEventTestRun.deadEndRaised = true;
           gEventTestRun.pendingHeading = oppositeOf(gEventTestRun.heading);
           gEventTestRun.heading = gEventTestRun.pendingHeading;
           resetDrivePidControl();
@@ -3845,6 +4030,10 @@ void updateEventTestRun() {
         if (confirmed == EventType::LeftTurn ||
             confirmed == EventType::RightTurn ||
             confirmed == EventType::TJunction) {
+          if (confirmed == EventType::TJunction) {
+            gEventTestRun.finishArmed = true;
+            gEventTestRun.tJunctionRaised = true;
+          }
           if (confirmed == EventType::TJunction && gSelectedEventTest == EventTestCase::TJunction) {
             // Delay the actual route-memory/configured branch choice until the stop gate.
           } else if (confirmed != EventType::TJunction) {
@@ -4351,7 +4540,14 @@ void drawDetectionSettingsScreen() {
 
 void drawSensorMonitorScreen() {
   Heading heading = gExecutive.running ? gExecutive.heading : gPreviewHeading;
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  bool finishArmed = gExecutive.running ? gExecutive.finishArmed
+                                        : (gPreviewRun.active ? gPreviewRun.finishArmed : false);
+  bool tJunctionStraightArmed = gExecutive.running
+                                  ? tJunctionStraightReady(gExecutive.tJunctionRaised, gExecutive.deadEndRaised)
+                                  : (gPreviewRun.active
+                                       ? tJunctionStraightReady(gPreviewRun.tJunctionRaised, gPreviewRun.deadEndRaised)
+                                       : false);
+  PerceptionFrame frame = buildPerceptionFrame(heading, finishArmed, tJunctionStraightArmed);
 
   drawHeader("Sensor Monitor");
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4396,7 +4592,14 @@ static void drawTwinSideStubs(int left, int top, int right, int bottom, const Re
 
 void drawTwinMonitorScreen() {
   Heading heading = gExecutive.running ? gExecutive.heading : gPreviewHeading;
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  bool finishArmed = gExecutive.running ? gExecutive.finishArmed
+                                        : (gPreviewRun.active ? gPreviewRun.finishArmed : false);
+  bool tJunctionStraightArmed = gExecutive.running
+                                  ? tJunctionStraightReady(gExecutive.tJunctionRaised, gExecutive.deadEndRaised)
+                                  : (gPreviewRun.active
+                                       ? tJunctionStraightReady(gPreviewRun.tJunctionRaised, gPreviewRun.deadEndRaised)
+                                       : false);
+  PerceptionFrame frame = buildPerceptionFrame(heading, finishArmed, tJunctionStraightArmed);
 
   drawHeader(eventToString(frame.candidate));
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4613,20 +4816,25 @@ void drawEventTestMenuScreen() {
 void drawEventTestConfigScreen() {
   drawHeader(eventTestCaseToString(gSelectedEventTest));
   int itemCount = currentEventConfigItemCount();
-  char items[32][32];
-  const char* ptrs[32];
+  int selectedIndex = normalizeEventTestConfigIndex(gEventTestConfigIndex);
+  gEventTestConfigIndex = selectedIndex;
+  char items[EVENT_CONFIG_FIELD_COUNT][EVENT_CONFIG_TEXT_SIZE];
+  const char* ptrs[EVENT_CONFIG_FIELD_COUNT];
   for (int i = 0; i < itemCount; ++i) {
     eventConfigFieldText(currentEventConfigFieldAt(i), items[i], sizeof(items[i]));
     ptrs[i] = items[i];
   }
-  drawScrollableItemList(ptrs, itemCount, gEventTestConfigIndex, 26);
+  drawScrollableItemList(ptrs, itemCount, selectedIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Behavior fields only");
 }
 
 void drawEventTestRunScreen() {
   drawHeader("Event Run");
-  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gEventTestRun.heading,
+                                               gEventTestRun.finishArmed,
+                                               tJunctionStraightReady(gEventTestRun.tJunctionRaised,
+                                                                     gEventTestRun.deadEndRaised));
   u8g2.setFont(u8g2_font_5x8_tr);
   char line[32];
   snprintf(line, sizeof(line), "Case:%s", eventTestCaseToString(gSelectedEventTest));
@@ -4694,7 +4902,10 @@ void drawMazeTestRunScreen() {
   const char* errorText = nullptr;
   bool startReady = planNextAttempt(executionMode, recordMode, errorText);
   Heading heading = gPreviewRun.active ? gPreviewRun.heading : headingFromIndex(activeSettings.startHeadingIndex);
-  PerceptionFrame frame = buildPerceptionFrame(heading);
+  PerceptionFrame frame = buildPerceptionFrame(heading,
+                                               gPreviewRun.finishArmed,
+                                               tJunctionStraightReady(gPreviewRun.tJunctionRaised,
+                                                                     gPreviewRun.deadEndRaised));
 
   drawHeader("Execution Preview");
   u8g2.setFont(u8g2_font_5x8_tr);
@@ -4803,7 +5014,10 @@ void drawStartConfirmScreen() {
 }
 
 void drawRunScreen() {
-  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading);
+  PerceptionFrame frame = buildPerceptionFrame(gExecutive.heading,
+                                               gExecutive.finishArmed,
+                                               tJunctionStraightReady(gExecutive.tJunctionRaised,
+                                                                     gExecutive.deadEndRaised));
   drawHeader("Execution");
   u8g2.setFont(u8g2_font_5x8_tr);
 
@@ -4937,11 +5151,22 @@ void loop() {
   }
   gEncoderStepCarry = combinedEncoderDelta;
 
+  if (serviceFinishInterrupt()) {
+    // The finish request forcefully saves the coherent attempt result and
+    // returns the UI to StartConfirm before any later loop branch can
+    // overwrite the screen state back to RunScreen.
+  }
+
   if (gExecutive.running) {
     refreshSensors();
     (void)readButtonEvent(false);
     updateExecutive();
-    gCurrentScreen = Screen::RunScreen;
+    if (serviceFinishInterrupt()) {
+      // Finish was confirmed during updateExecutive(); leave the freshly
+      // stored attempt result and StartConfirm screen intact.
+    } else if (gExecutive.running) {
+      gCurrentScreen = Screen::RunScreen;
+    }
   } else if (gCurrentScreen == Screen::PIDTest) {
     ButtonEvent buttonEvent = readButtonEvent(true);
     handlePidTestInput(encoderDelta, buttonEvent);
