@@ -1,0 +1,99 @@
+Menu,Shown In,Display Name,Scope,Unit,Format,Default,Description
+Root,Main menu,Start,Action,-,-,-,Opens the start confirmation screen before a real run begins and shows the previous Right Left and Selection attempt results.
+Root,Main menu,Start Settings,Navigation,-,-,-,Opens route mode start direction and turn-wait setup.
+Root,Main menu,Settings,Navigation,-,-,-,Opens shared thresholds and top-level tuning menus.
+Root,Main menu,Event Test,Navigation,-,-,-,Opens event-test selection and per-test configuration. The dedicated T-Jct Straight event test starts with its T-junction and Dead-end flags already armed so it remains testable in isolation.
+Root,Main menu,IMU Test,Navigation,-,-,-,Shows live onboard IMU values and status.
+Root,Main menu,Yaw Test,Navigation,deg,0.0,-,Shows relative yaw and lets the user renew the yaw reference.
+Root,Main menu,Execution State,Navigation,-,-,-,Runs the same recognition and handling flow as Start without driving the motors and shows live IR plus ultrasonic data.
+Root,Main menu,IR Test,Navigation,-,-,-,Shows live IR states and shared event-confirmation values.
+Root,Main menu,Ultrasonic Test,Navigation,cm,0.0,-,Shows live ultrasonic distances.
+Start Settings,All runs,Route Mode,Shared,mode,enum,Sequence,Selects how branch choices are made across attempts. Sequence runs Right then Left then preselects the better branch using dead-end status and run time.
+Start Settings,All runs,Start Direction,Shared,direction,enum,North,Sets the initial heading for a real run.
+Start Settings,All runs,Turn Wait,Shared,s,00.00,5.00,Pause time after stopping before the heading change stage.
+Settings,All runs,PID,Navigation,-,-,-,Opens the wall-PID menu.
+Settings,All runs,Motor Tune,Navigation,-,-,-,Opens the motor-tuning and speed-scaling menu.
+Settings,All runs,IMU On/Off,Shared,toggle,ON/OFF,ON,Globally enables or disables IMU usage everywhere.
+Settings,All runs,Global Speed,Shared,scale,0.00,1.00,Scales base travel speed without shrinking PID or IMU correction authority.
+Settings,All runs,Front Stop,Shared,cm,00.00,4.00,Front safety stop threshold.
+Settings,All runs,Wall Threshold,Shared,cm,00.00,6.00,Side-wall threshold used for PID source selection.
+Settings,All runs,Turn Detect,Shared,cm,00.00,26.00,Upper front range that still counts as turn/junction geometry.
+Settings,All runs,Dead-End,Shared,cm,00.00,16.00,Front distance threshold for dead-end classification.
+Settings,All runs,Finish,Shared,cm,00.00,30.00,Front distance threshold used in finish confirmation after finish has been armed by a confirmed T-junction.
+Settings,All runs,Check Gap,Shared,s,00.00,0.10,Time between repeated identical-event confirmation checks.
+Settings,All runs,US Avg K,Shared,count,0,5,How many ultrasonic samples are averaged before event logic and handling use them.
+Settings,All runs,Match N,Shared,count,0,3,Number of identical repeated event reads required for confirmation.
+PID,All runs,P Gain,Shared,x,0.000,0.500,Wall PID proportional gain for the new bounded wall error.
+PID,All runs,I Gain,Shared,x,0.000,0.000,Wall PID integral gain.
+PID,All runs,D Gain,Shared,x,0.000,0.000,Wall PID derivative gain for the new bounded wall error.
+PID,All runs,Curve b,Shared,x,0.00,1.00,Wall-error shaping factor.
+PID,All runs,1-wall Target,Shared,cm,00.00,16.00,Fallback one-wall target when no recent wall reference exists.
+PID,All runs,1-wall Deadband,Shared,cm,00.00,0.60,Deadband applied only to one-wall distance error.
+PID,All runs,2-wall Full,Shared,cm,00.00,8.00,Side-distance difference that maps to full two-wall correction.
+PID,All runs,2-wall Deadband,Shared,x,0.000,0.050,Deadband applied to the normalized two-wall error.
+PID,All runs,D Filter Alpha,Shared,x,0.000,0.200,Low-pass alpha used on the wall PID derivative term.
+PID,All runs,Left Output,Shared,x,0.00,1.00,Extra output scale when the final correction points left.
+PID,All runs,Right Output,Shared,x,0.00,0.80,Extra output scale when the final correction points right.
+PID,All runs,PID Test,Navigation,-,-,-,Shows wall PID interpretation for the selected heading.
+PID,All runs,IMU PID,Navigation,-,-,-,Opens the separate IMU PID submenu.
+IMU PID,All runs,IMU On/Off,Shared,toggle,ON/OFF,ON,Globally enables or disables IMU usage.
+IMU PID,All runs,IMU P,Shared,x,0.0000,0.0050,IMU yaw-hold proportional gain.
+IMU PID,All runs,IMU I,Shared,x,0.0000,0.0000,IMU yaw-hold integral gain.
+IMU PID,All runs,IMU D,Shared,x,0.0000,0.0000,IMU yaw-hold derivative gain.
+IMU PID,All runs,Lat P,Shared,x,0.0000,0.1800,NoWalls-only IMU lateral proportional gain that suppresses signed sideways body acceleration.
+IMU PID,All runs,Lat I,Shared,x,0.0000,0.0000,NoWalls-only IMU lateral integral gain. Starts at zero and can remain zero for initial tuning.
+IMU PID,All runs,Lat D,Shared,x,0.0000,0.0300,NoWalls-only IMU lateral derivative gain for damping sideways drift response.
+IMU PID,All runs,Lat LPF,Shared,x,0.00,0.12,Low-pass alpha applied to the body-frame lateral acceleration before the NoWalls lateral controller acts.
+IMU PID,All runs,IMU Threshold,Shared,deg,00.00,1.00,Extra yaw threshold above the IMU measurement deadband.
+IMU PID,All runs,Yaw Error,Shared,deg,00.00,3.00,Allowed yaw window for the isolated IMU PID test.
+IMU PID,All runs,IMU Sign,Shared,sign,+1/-1,-1,Flips the IMU rotational correction direction if hardware turns the wrong way.
+IMU PID,All runs,IMU PID Test,Navigation,-,-,-,Runs the isolated pure-rotation yaw recovery test.
+Motor Tune,All runs,Stop,Action,-,-,-,Stops all motors.
+Motor Tune,All runs,North,Action,-,-,-,Runs the north travel-direction tune action.
+Motor Tune,All runs,East,Action,-,-,-,Runs the east travel-direction tune action.
+Motor Tune,All runs,South,Action,-,-,-,Runs the south travel-direction tune action.
+Motor Tune,All runs,West,Action,-,-,-,Runs the west travel-direction tune action.
+Motor Tune,All runs,Global Speed,Shared,scale,0.00,1.00,Scales base travel speed without shrinking PID or IMU correction authority.
+Motor Tune,All runs,Travel Speed,Shared,scale,0.00,0.35,Forward corridor speed used by the runtime.
+Motor Tune,All runs,Approach Speed,Shared,scale,0.00,0.28,Reduced speed used when seeking or reacquiring a corridor.
+Motor Tune,All runs,Left Drive,Shared,scale,0.00,1.00,Left-side drive calibration multiplier.
+Motor Tune,All runs,Right Drive,Shared,scale,0.00,1.00,Right-side drive calibration multiplier.
+IR Test,All runs,Check Gap,Shared,s,00.00,0.10,Same repeated-event recheck gap used by real execution and event tests.
+IR Test,All runs,Match N,Shared,count,0,3,Same repeated-event match count used by real execution and event tests.
+IR Test,All runs,Dead-End,Shared,cm,00.00,16.00,Shared dead-end threshold.
+IR Test,All runs,Finish,Shared,cm,00.00,30.00,Shared finish threshold used only when the finish-arm condition is true.
+Event Config,All event tests,Heading,Per test,direction,enum,North,Heading used before the selected event test starts.
+Event Config,T-Junction only,Turn Choice,Per test,left-right,enum,Left,Branch choice for the forced T-junction test.
+Event Config,All event tests,Global Speed,Shared,scale,0.00,1.00,Shared base-travel scale used during event tests without weakening correction.
+Event Config,Turn-capable tests,Front Stop,Shared,cm,00.00,4.00,Shared front stop threshold used before the stop stage.
+Event Config,All event tests,Wall Threshold,Shared,cm,00.00,6.00,Shared side-wall threshold for PID source selection.
+Event Config,Turn-capable tests,Turn Detect,Shared,cm,00.00,26.00,Shared upper front range that still means turn geometry. T-Jct Straight also requires previously raised T-junction and Dead-end flags in real runs.
+Event Config,All event tests,Dead-End,Shared,cm,00.00,16.00,Shared dead-end threshold.
+Event Config,All event tests,Finish,Shared,cm,00.00,30.00,Shared finish threshold. All event tests except T-junction begin with finish already armed.
+Event Config,Turn-capable tests,Turn Wait,Shared,s,00.00,5.00,Shared wait time before commanding the new heading.
+Event Config,All event tests,Check Gap,Shared,s,00.00,0.10,Shared repeated-event recheck gap.
+Event Config,All event tests,Match N,Shared,count,0,3,Shared repeated-event match count.
+Event Config,All event tests,P Gain,Shared,x,0.000,0.500,Shared wall PID proportional gain.
+Event Config,All event tests,I Gain,Shared,x,0.000,0.000,Shared wall PID integral gain.
+Event Config,All event tests,D Gain,Shared,x,0.000,0.000,Shared wall PID derivative gain.
+Event Config,All event tests,Curve b,Shared,x,0.00,1.00,Shared wall-error shaping factor.
+Event Config,All event tests,1-wall Target,Shared,cm,00.00,16.00,Shared one-wall target fallback.
+Event Config,All event tests,1-wall Deadband,Shared,cm,00.00,0.60,Shared one-wall deadband.
+Event Config,All event tests,2-wall Full,Shared,cm,00.00,8.00,Shared two-wall full-scale side difference.
+Event Config,All event tests,2-wall Deadband,Shared,x,0.000,0.050,Shared normalized two-wall deadband.
+Event Config,All event tests,D Filter Alpha,Shared,x,0.000,0.200,Shared derivative filter alpha.
+Event Config,All event tests,Left Output,Shared,x,0.00,1.00,Shared left correction scale.
+Event Config,All event tests,Right Output,Shared,x,0.00,0.80,Shared right correction scale.
+Event Config,All event tests,IMU On/Off,Shared,toggle,ON/OFF,ON,Shared global IMU enable switch.
+Event Config,All event tests,IMU P,Shared,x,0.0000,0.0050,Shared IMU proportional gain.
+Event Config,All event tests,IMU I,Shared,x,0.0000,0.0000,Shared IMU integral gain.
+Event Config,All event tests,IMU D,Shared,x,0.0000,0.0000,Shared IMU derivative gain.
+Event Config,All event tests,Lat P,Shared,x,0.0000,0.1800,Shared NoWalls-only IMU lateral proportional gain.
+Event Config,All event tests,Lat I,Shared,x,0.0000,0.0000,Shared NoWalls-only IMU lateral integral gain.
+Event Config,All event tests,Lat D,Shared,x,0.0000,0.0300,Shared NoWalls-only IMU lateral derivative gain.
+Event Config,All event tests,Lat LPF,Shared,x,0.00,0.12,Shared low-pass alpha for NoWalls lateral acceleration filtering.
+Event Config,All event tests,IMU Threshold,Shared,deg,00.00,1.00,Shared extra IMU yaw threshold.
+Event Config,All event tests,Yaw Error,Shared,deg,00.00,3.00,Shared yaw window used by the isolated IMU PID test.
+Event Config,All event tests,IMU Sign,Shared,sign,+1/-1,-1,Shared IMU rotation sign.
+Start Confirm,After start or finish,Short Press,Action,-,-,-,Begins the next run or sequential attempt. For the third Sequence attempt the chosen branch is decided before start; if both earlier branches had dead-ends an error is shown instead.
+Start Confirm,After start or finish,Long Press,Action,-,-,-,Returns to the root menu.

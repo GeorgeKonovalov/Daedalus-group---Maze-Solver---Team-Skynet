@@ -1,0 +1,159 @@
+test_full_v58 summary
+=====================
+
+Date
+----
+- Day: Saturday
+- Time: 2026-04-18 22:22:28 +01:00
+
+Author
+------
+- George Konovalov
+
+Base
+----
+- Created as a new version from `test_full_v56.ino`
+- Purpose of v58: add IMU-based lateral drift suppression in `NoWalls` mode while preserving the existing wall PID and IMU yaw PID architecture
+
+Updated files
+-------------
+- test_full_v58.ino
+- test_full_v58_summary.txt
+- test_full_v58_settings_layout.csv
+
+Implemented changes
+-------------------
+1. Added a dedicated IMU lateral compensation controller for `NoWalls`.
+   - It activates only when `PidSource::None` is active, meaning both side walls are absent.
+   - It injects into the same `lateralCmd` path used by wall-following, not the rotational path.
+   - It leaves the existing wall PID untouched when walls are present.
+2. Kept the existing IMU yaw controller separate.
+   - Yaw hold still contributes only to `rotationCmd`.
+   - The new lateral controller does not alter the existing IMU yaw PID math.
+3. Implemented the requested 45 degree body-frame transform for IMU planar acceleration.
+   - `aForwardBody = 0.7071 * ax + 0.7071 * ay`
+   - `aLateralBody = -0.7071 * ax + 0.7071 * ay`
+   - Only the signed lateral body-frame component is used for the new controller.
+4. Added first-order low-pass filtering on the lateral acceleration signal.
+   - The filtered state is updated as `latFilt += alpha * (aLateralBody - latFilt)`.
+   - Default filter alpha is `0.12`.
+5. Added PD-style lateral control with the requested starting parameters.
+   - `imuLatP = 0.1800`
+   - `imuLatI = 0.0000`
+   - `imuLatD = 0.0300`
+   - Output is clamped to `[-1.0, 1.0]`.
+6. Added runtime reset handling for the new lateral controller.
+   - The lateral runtime is cleared whenever drive PID control is reset.
+   - The lateral runtime is also cleared when IMU is globally disabled.
+   - The lateral runtime is explicitly reset whenever wall-guided modes are active so stale filtered drift does not leak back in later.
+7. Extended the IMU PID submenu with lateral-compensation tuning.
+   - Added `Lat P`
+   - Added `Lat I`
+   - Added `Lat D`
+   - Added `Lat LPF`
+8. Extended the event-test config menu with the same IMU lateral tuning fields.
+   - The new fields are available anywhere the existing IMU yaw PID fields are already configurable for event tests.
+
+Why this change was needed
+--------------------------
+- In the inherited v56 base, `NoWalls` already zeroed wall PID correction, but there was no dedicated lateral-drift suppression term in the lateral command channel.
+- The existing IMU yaw PID could maintain heading, but it does not correct signed sideways body motion.
+- That meant open-space travel could keep the right heading while still drifting laterally.
+
+Modified functions and sections
+-------------------------------
+- `RuntimeSettings`
+- `RuntimeConfig`
+- `EventConfigField`
+- `commitRuntimeConfig()`
+- `resetDrivePidControl()`
+- `resetImuPid()`
+- `resetImuLateralPid()`
+- `currentImuLateralCompensation()`
+- `followSmart()`
+- `followSmartForced()`
+- `handleImuPidMenuInput()`
+- `drawImuPidMenuScreen()`
+- `eventConfigFieldRelevant()`
+- `eventConfigDesc1()`
+- `eventConfigDesc2()`
+- `handleEventTestConfigInput()`
+- `eventConfigFieldText()`
+
+Preserved behavior
+------------------
+- Existing 2-wall PID math was not changed.
+- Existing 1-wall PID math was not changed.
+- Existing IMU yaw PID math was not changed.
+- Event/state-machine structure was not rewritten.
+- Wall-present behavior remains wall-PID-driven.
+- `NoWalls` continues to use zero wall-PID lateral correction; the new IMU lateral term is added only there.
+
+Bugs and issues found during this pass
+--------------------------------------
+- The inherited `NoWalls` path had no dedicated lateral suppression, so the robot could keep yaw while still slipping sideways in open areas.
+- The existing IMU yaw controller could not solve that problem because it acts only on rotation.
+- The IMU menu and event-test config previously had no direct tuning path for a lateral inertial compensator.
+
+Sanity checks completed
+-----------------------
+- Checked that the new IMU lateral controller is only used when `PidSource::None`.
+- Checked that wall-guided modes explicitly reset the lateral IMU runtime instead of reusing stale filtered values.
+- Checked that IMU-off handling clears the new lateral runtime.
+- Checked that the new IMU lateral output is applied only through `lateralCmd`.
+- Checked that the new menu fields were added to both the IMU PID submenu and the event-test config path.
+- Checked that the new `EventConfigField` enum values were wired through the relevant switch statements so the file remains internally consistent.
+
+Verification status
+-------------------
+- Source-level consistency pass completed
+- `arduino-cli` is not installed in this workspace, so no board compile was run here
+- `git` is not installed in this workspace, so this report is based on direct file inspection instead of a git diff
+
+Changed code excerpts
+---------------------
+1. New IMU lateral settings
+
+```cpp
+int imuLatP_x10000 = 1800;
+int imuLatI_x10000 = 0;
+int imuLatD_x10000 = 300;
+int imuLatFilterAlpha_x100 = 12;
+```
+
+2. New NoWalls lateral compensation path
+
+```cpp
+float correction = 0.0f;
+if (controlSource == PidSource::None) {
+  correction = currentImuLateralCompensation(forwardSpeed);
+} else {
+  resetImuLateralPid();
+  correction = computeWallCorrection(frame, controlSource);
+}
+```
+
+3. New IMU lateral controller core
+
+```cpp
+float aForwardBody = IMU_BODY_AXIS_C45 * gImu.ax + IMU_BODY_AXIS_C45 * gImu.ay;
+float aLateralBody = -IMU_BODY_AXIS_C45 * gImu.ax + IMU_BODY_AXIS_C45 * gImu.ay;
+
+gImuLatPid.filteredLateralBodyG +=
+  gCfg.imuLatFilterAlpha * (aLateralBody - gImuLatPid.filteredLateralBodyG);
+
+float error = -gImuLatPid.filteredLateralBodyG;
+float derivative = (error - gImuLatPid.previousError) / dt;
+float output = gCfg.imuLatP * error +
+               gCfg.imuLatI * gImuLatPid.integral +
+               gCfg.imuLatD * derivative;
+```
+
+4. New IMU submenu tuning fields
+
+```cpp
+case 4: openDigitEditor("Lat P", "x", &workingSettings.imuLatP_x10000, ...); break;
+case 5: openDigitEditor("Lat I", "x", &workingSettings.imuLatI_x10000, ...); break;
+case 6: openDigitEditor("Lat D", "x", &workingSettings.imuLatD_x10000, ...); break;
+case 7: openDigitEditor("Lat LPF", "x", &workingSettings.imuLatFilterAlpha_x100, ...); break;
+```
