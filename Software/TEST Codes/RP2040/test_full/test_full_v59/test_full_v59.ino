@@ -83,24 +83,24 @@ struct RuntimeSettings {
   uint8_t wallPidEnabled = 1;
   uint8_t pid1WallSymmetryEnabled = 1;
   int pidDeadband1W_x100 = 60;
-  int p_x1000 = 400;
-  int i_x1000 = 50;     //   
-  int d_x1000 = 200;     //   
-  int pid1WallP_x1000 = 400;
-  int pid1WallI_x1000 = 50;
-  int pid1WallD_x1000 = 200;
-  int pid1WallRightP_x1000 = 400;
-  int pid1WallRightI_x1000 = 50;
-  int pid1WallRightD_x1000 = 200;
+  int p_x1000 = 250;
+  int i_x1000 = 00;     //   
+  int d_x1000 = 20;     //   
+  int pid1WallP_x1000 = 250;
+  int pid1WallI_x1000 = 0;
+  int pid1WallD_x1000 = 20;
+  int pid1WallRightP_x1000 = 250;
+  int pid1WallRightI_x1000 = 0;
+  int pid1WallRightD_x1000 = 20;
   // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
   uint8_t imuEnabled = 1;
   int imuSign_x100 = -100;
-  int imuP_x10000 = 19000;
+  int imuP_x10000 = 29000;
   int imuI_x10000 = 7000;
   int imuD_x10000 = 0;
-  int imuLatP_x10000 = 1800;
+  int imuLatP_x10000 = 2500;
   int imuLatI_x10000 = 0;
-  int imuLatD_x10000 = 300;
+  int imuLatD_x10000 = 1000;
   int imuLatFilterAlpha_x100 = 12;
   int imuAngleThreshold_x100 = 100;
   int imuPidTestYawError_x100 = 300;
@@ -108,16 +108,24 @@ struct RuntimeSettings {
   int pidTwoWallFullError_x100 = 800;
   int pidDeadband2W_x1000 = 50;
   int pidDFilterAlpha_x1000 = 200;
-  int pidWallDistance_x100 = 270;
+  int pidWallDistance_x100 = 350;
   int pidLeftScale_x100 = 100;
-  int pidRightScale_x100 = 80;
-  int overallSpeedScale_x100 = 100;
+  int pidRightScale_x100 = 100;
+  int overallSpeedScale_x100 = 80;
   int overallStart_x100 = 20;
   int overallRampK_x100 = 200;
   int baseSpeed_x100 = 35;
   int approachSpeed_x100 = 28;
   int leftDriveScale_x100 = 100;
   int rightDriveScale_x100 = 100;
+  int servoStopFL_x100 = STOP_FL * 100;
+  int servoStopFR_x100 = STOP_FR * 100;
+  int servoStopRR_x100 = STOP_RR * 100;
+  int servoStopRL_x100 = STOP_RL * 100;
+  int servoDeadbandFL_x100 = 0;
+  int servoDeadbandFR_x100 = 0;
+  int servoDeadbandRR_x100 = 0;
+  int servoDeadbandRL_x100 = 0;
 
   int frontStopDistance_x100 = 600;
   int frontHoldReference_x100 = 350;
@@ -127,10 +135,10 @@ struct RuntimeSettings {
   int turnYawTolerance_x100 = 300;
   int corridorWallThreshold_x100 = 1600;
   int turnDetectDistance_x100 = 2600;
-  int deadEndDistance_x100 = 1600;
+  int deadEndDistance_x100 = 2000;
   int finishDistance_x100 = 3000;
-  int sensingInterval_x100 = 10;
-  int eventConfirmCount = 3;
+  int sensingInterval_x100 = 1;
+  int eventConfirmCount = 2;
   int ultrasonicAvgCount = 3;
   int waitBeforeTurn_x100 = 500;
 
@@ -176,6 +184,14 @@ struct RuntimeConfig {
   float approachSpeed = 0.28f;
   float leftDriveScale = 1.0f;
   float rightDriveScale = 1.0f;
+  float servoStopFL = (float)STOP_FL;
+  float servoStopFR = (float)STOP_FR;
+  float servoStopRR = (float)STOP_RR;
+  float servoStopRL = (float)STOP_RL;
+  float servoDeadbandFL = 0.0f;
+  float servoDeadbandFR = 0.0f;
+  float servoDeadbandRR = 0.0f;
+  float servoDeadbandRL = 0.0f;
 
   float frontStopDistanceCm = 4.0f;
   float frontHoldReferenceCm = 3.5f;
@@ -566,6 +582,13 @@ enum class TuneMotion : uint8_t {
   West
 };
 
+enum class WheelId : uint8_t {
+  FL,
+  FR,
+  RR,
+  RL
+};
+
 struct DigitEditor {
   bool active = false;
   bool digitUnlocked = false;
@@ -756,7 +779,12 @@ float computeWallCorrection(const PerceptionFrame& frame, PidSource source);
 void resetWallReference();
 void updateWallReference(const PerceptionFrame& frame);
 PidSource stabilizedPidSource(const PerceptionFrame& frame, PidSource previousSource);
-void writeServoCommand(Servo& servo, int stopAngle, int rangeAngle, int invert, float cmd);
+float servoStopAngleForWheel(WheelId wheel);
+float servoDeadbandForWheel(WheelId wheel);
+int servoRangeForWheel(WheelId wheel);
+int servoInvertForWheel(WheelId wheel);
+void writeServoCommand(Servo& servo, float stopAngle, int rangeAngle, int invert, float cmd);
+void writeWheelCommand(WheelId wheel, Servo& servo, float cmd);
 void stopAll();
 void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Heading heading);
 void driveRobotFrameAdvanced(float lateralCmd, float baseForwardCmd, float forwardCompCmd, float rotationCmd, Heading heading);
@@ -1031,6 +1059,14 @@ void commitRuntimeConfig() {
   gCfg.approachSpeed = clampFloat(fixedToFloat2(activeSettings.approachSpeed_x100), 0.0f, 1.0f);
   gCfg.leftDriveScale = clampFloat(fixedToFloat2(activeSettings.leftDriveScale_x100), 0.10f, 3.0f);
   gCfg.rightDriveScale = clampFloat(fixedToFloat2(activeSettings.rightDriveScale_x100), 0.10f, 3.0f);
+  gCfg.servoStopFL = clampFloat(fixedToFloat2(activeSettings.servoStopFL_x100), 0.0f, 180.0f);
+  gCfg.servoStopFR = clampFloat(fixedToFloat2(activeSettings.servoStopFR_x100), 0.0f, 180.0f);
+  gCfg.servoStopRR = clampFloat(fixedToFloat2(activeSettings.servoStopRR_x100), 0.0f, 180.0f);
+  gCfg.servoStopRL = clampFloat(fixedToFloat2(activeSettings.servoStopRL_x100), 0.0f, 180.0f);
+  gCfg.servoDeadbandFL = clampFloat(fixedToFloat2(activeSettings.servoDeadbandFL_x100), 0.0f, 1.0f);
+  gCfg.servoDeadbandFR = clampFloat(fixedToFloat2(activeSettings.servoDeadbandFR_x100), 0.0f, 1.0f);
+  gCfg.servoDeadbandRR = clampFloat(fixedToFloat2(activeSettings.servoDeadbandRR_x100), 0.0f, 1.0f);
+  gCfg.servoDeadbandRL = clampFloat(fixedToFloat2(activeSettings.servoDeadbandRL_x100), 0.0f, 1.0f);
   gCfg.pidDeadband1WCm = fixedToFloat2(activeSettings.pidDeadband1W_x100);
 
   gCfg.frontStopDistanceCm = fixedToFloat2(activeSettings.frontStopDistance_x100);
@@ -2602,7 +2638,47 @@ static void runFrontNormalization(Heading heading, const PerceptionFrame& frame)
   driveRobotFrameAdvanced(lateralCorrection, 0.0f, forwardCorrection, rotationComp, heading);
 }
 
-void writeServoCommand(Servo& servo, int stopAngle, int rangeAngle, int invert, float cmd) {
+float servoStopAngleForWheel(WheelId wheel) {
+  switch (wheel) {
+    case WheelId::FL: return gCfg.servoStopFL;
+    case WheelId::FR: return gCfg.servoStopFR;
+    case WheelId::RR: return gCfg.servoStopRR;
+    case WheelId::RL: return gCfg.servoStopRL;
+    default:          return (float)STOP_FL;
+  }
+}
+
+float servoDeadbandForWheel(WheelId wheel) {
+  switch (wheel) {
+    case WheelId::FL: return gCfg.servoDeadbandFL;
+    case WheelId::FR: return gCfg.servoDeadbandFR;
+    case WheelId::RR: return gCfg.servoDeadbandRR;
+    case WheelId::RL: return gCfg.servoDeadbandRL;
+    default:          return 0.0f;
+  }
+}
+
+int servoRangeForWheel(WheelId wheel) {
+  switch (wheel) {
+    case WheelId::FL: return RANGE_FL;
+    case WheelId::FR: return RANGE_FR;
+    case WheelId::RR: return RANGE_RR;
+    case WheelId::RL: return RANGE_RL;
+    default:          return RANGE_FL;
+  }
+}
+
+int servoInvertForWheel(WheelId wheel) {
+  switch (wheel) {
+    case WheelId::FL: return INV_FL;
+    case WheelId::FR: return INV_FR;
+    case WheelId::RR: return INV_RR;
+    case WheelId::RL: return INV_RL;
+    default:          return INV_FL;
+  }
+}
+
+void writeServoCommand(Servo& servo, float stopAngle, int rangeAngle, int invert, float cmd) {
   cmd = clampUnit(cmd) * (float)invert;
 
   int usStop = 1000 + (int)lroundf((stopAngle / 180.0f) * 1000.0f);
@@ -2612,11 +2688,26 @@ void writeServoCommand(Servo& servo, int stopAngle, int rangeAngle, int invert, 
   servo.writeMicroseconds(usValue);
 }
 
+void writeWheelCommand(WheelId wheel, Servo& servo, float cmd) {
+  float stopAngle = servoStopAngleForWheel(wheel);
+  int rangeAngle = servoRangeForWheel(wheel);
+  int invert = servoInvertForWheel(wheel);
+
+  // Each wheel gets its own near-zero neutral zone so tiny residual commands
+  // can be forced to the calibrated stop center instead of creeping.
+  if (fabsf(cmd) <= servoDeadbandForWheel(wheel)) {
+    writeServoCommand(servo, stopAngle, rangeAngle, invert, 0.0f);
+    return;
+  }
+
+  writeServoCommand(servo, stopAngle, rangeAngle, invert, cmd);
+}
+
 void stopAll() {
-  writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, 0.0f);
-  writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, 0.0f);
-  writeServoCommand(servoRR, STOP_RR, RANGE_RR, INV_RR, 0.0f);
-  writeServoCommand(servoRL, STOP_RL, RANGE_RL, INV_RL, 0.0f);
+  writeWheelCommand(WheelId::FL, servoFL, 0.0f);
+  writeWheelCommand(WheelId::FR, servoFR, 0.0f);
+  writeWheelCommand(WheelId::RR, servoRR, 0.0f);
+  writeWheelCommand(WheelId::RL, servoRL, 0.0f);
 }
 
 static void normalizeWheelEnvelope(float& fl, float& fr, float& rr, float& rl) {
@@ -2696,10 +2787,10 @@ static void driveBodyFrameLimited(float baseVx, float baseVy,
 
   normalizeWheelEnvelope(fl, fr, rr, rl);
 
-  writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, fl);
-  writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, fr);
-  writeServoCommand(servoRR, STOP_RR, RANGE_RR, INV_RR, rr);
-  writeServoCommand(servoRL, STOP_RL, RANGE_RL, INV_RL, rl);
+  writeWheelCommand(WheelId::FL, servoFL, fl);
+  writeWheelCommand(WheelId::FR, servoFR, fr);
+  writeWheelCommand(WheelId::RR, servoRR, rr);
+  writeWheelCommand(WheelId::RL, servoRL, rl);
 }
 
 /*
@@ -2743,10 +2834,10 @@ static void driveBodyFrame(float vx, float vy, float w) {
 
   normalizeWheelEnvelope(fl, fr, rr, rl);
 
-  writeServoCommand(servoFL, STOP_FL, RANGE_FL, INV_FL, fl);
-  writeServoCommand(servoFR, STOP_FR, RANGE_FR, INV_FR, fr);
-  writeServoCommand(servoRR, STOP_RR, RANGE_RR, INV_RR, rr);
-  writeServoCommand(servoRL, STOP_RL, RANGE_RL, INV_RL, rl);
+  writeWheelCommand(WheelId::FL, servoFL, fl);
+  writeWheelCommand(WheelId::FR, servoFR, fr);
+  writeWheelCommand(WheelId::RR, servoRR, rr);
+  writeWheelCommand(WheelId::RL, servoRL, rl);
 }
 
 void driveRobotFrame(float lateralCmd, float forwardCmd, float rotationCmd, Heading heading) {
@@ -3818,7 +3909,7 @@ void handleImuPidTestInput(ButtonEvent buttonEvent) {
 }
 
 void handleMotorTuneInput(int encoderDelta, ButtonEvent buttonEvent) {
-  constexpr int itemCount = 11;
+  constexpr int itemCount = 19;
   if (encoderDelta != 0) {
     gMotorTuneIndex += encoderDelta;
     if (gMotorTuneIndex < 0) gMotorTuneIndex = 0;
@@ -3862,6 +3953,38 @@ void handleMotorTuneInput(int encoderDelta, ButtonEvent buttonEvent) {
                         "Right diagonal drive", "scale calibration", Screen::MotorTune, 1, 2);
         break;
       case 10:
+        openDigitEditor("FL stop", "deg", &workingSettings.servoStopFL_x100, 0, 18000,
+                        "Front-left neutral", "center output", Screen::MotorTune, 3, 2);
+        break;
+      case 11:
+        openDigitEditor("FR stop", "deg", &workingSettings.servoStopFR_x100, 0, 18000,
+                        "Front-right neutral", "center output", Screen::MotorTune, 3, 2);
+        break;
+      case 12:
+        openDigitEditor("RR stop", "deg", &workingSettings.servoStopRR_x100, 0, 18000,
+                        "Rear-right neutral", "center output", Screen::MotorTune, 3, 2);
+        break;
+      case 13:
+        openDigitEditor("RL stop", "deg", &workingSettings.servoStopRL_x100, 0, 18000,
+                        "Rear-left neutral", "center output", Screen::MotorTune, 3, 2);
+        break;
+      case 14:
+        openDigitEditor("FL dead", "cmd", &workingSettings.servoDeadbandFL_x100, 0, 100,
+                        "Near-zero FL range", "forced to stop", Screen::MotorTune, 1, 2);
+        break;
+      case 15:
+        openDigitEditor("FR dead", "cmd", &workingSettings.servoDeadbandFR_x100, 0, 100,
+                        "Near-zero FR range", "forced to stop", Screen::MotorTune, 1, 2);
+        break;
+      case 16:
+        openDigitEditor("RR dead", "cmd", &workingSettings.servoDeadbandRR_x100, 0, 100,
+                        "Near-zero RR range", "forced to stop", Screen::MotorTune, 1, 2);
+        break;
+      case 17:
+        openDigitEditor("RL dead", "cmd", &workingSettings.servoDeadbandRL_x100, 0, 100,
+                        "Near-zero RL range", "forced to stop", Screen::MotorTune, 1, 2);
+        break;
+      case 18:
       default:
         gTuneMotion = TuneMotion::Stop;
         stopAll();
@@ -4852,7 +4975,7 @@ void drawIMUPIDTestScreen() {
 
 void drawMotorTuneScreen() {
   drawHeader("Motor Tune");
-  char items[11][28];
+  char items[19][28];
   char value[16];
   snprintf(items[0], sizeof(items[0]), "Stop");
   snprintf(items[1], sizeof(items[1]), "North");
@@ -4869,10 +4992,26 @@ void drawMotorTuneScreen() {
   snprintf(items[8], sizeof(items[8]), "LeftDrv:%s", value);
   formatCompactValue(value, sizeof(value), activeSettings.rightDriveScale_x100, 2);
   snprintf(items[9], sizeof(items[9]), "RightDrv:%s", value);
-  snprintf(items[10], sizeof(items[10]), "Back");
-  const char* ptrs[11];
-  for (int i = 0; i < 11; ++i) ptrs[i] = items[i];
-  drawScrollableItemList(ptrs, 11, gMotorTuneIndex, 26);
+  formatCompactValue(value, sizeof(value), activeSettings.servoStopFL_x100, 2);
+  snprintf(items[10], sizeof(items[10]), "FLStop:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoStopFR_x100, 2);
+  snprintf(items[11], sizeof(items[11]), "FRStop:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoStopRR_x100, 2);
+  snprintf(items[12], sizeof(items[12]), "RRStop:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoStopRL_x100, 2);
+  snprintf(items[13], sizeof(items[13]), "RLStop:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoDeadbandFL_x100, 2);
+  snprintf(items[14], sizeof(items[14]), "FLDead:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoDeadbandFR_x100, 2);
+  snprintf(items[15], sizeof(items[15]), "FRDead:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoDeadbandRR_x100, 2);
+  snprintf(items[16], sizeof(items[16]), "RRDead:%s", value);
+  formatCompactValue(value, sizeof(value), activeSettings.servoDeadbandRL_x100, 2);
+  snprintf(items[17], sizeof(items[17]), "RLDead:%s", value);
+  snprintf(items[18], sizeof(items[18]), "Back");
+  const char* ptrs[19];
+  for (int i = 0; i < 19; ++i) ptrs[i] = items[i];
+  drawScrollableItemList(ptrs, 19, gMotorTuneIndex, 26);
   u8g2.setFont(u8g2_font_5x8_tf);
   u8g2.drawStr(0, 63, "Short=run/edit Hold=back");
 }
