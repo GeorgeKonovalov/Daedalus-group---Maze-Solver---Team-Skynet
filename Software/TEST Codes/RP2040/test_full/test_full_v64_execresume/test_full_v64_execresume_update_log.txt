@@ -1,0 +1,183 @@
+test_full_v64_execresume update log
+==================================
+
+Author
+------
+George Konovalov
+
+Date and time
+-------------
+2026-04-22 16:56:07 +01:00
+
+Base version
+------------
+test_full_v63_stopconfirm
+
+Original lineage
+----------------
+v62_59v_back -> test_full_v63_stopconfirm -> test_full_v64_execresume
+
+New version
+-----------
+test_full_v64_execresume
+
+Purpose of update
+-----------------
+Fix two active issues in the new-version branch:
+
+1. the correction-complete handoff was not executing the newly confirmed event direction
+2. the workbook artifact was not reliably opening in Excel
+
+Summary of logic changes
+------------------------
+1. Added a dedicated post-correction release guard.
+   - New internal runtime flag:
+     - `postCorrectionReleaseActive`
+   - Added to:
+     - `ExecutiveState`
+     - `PreviewState`
+     - `EventTestState`
+
+2. Added helper `holdPostCorrectionRelease(...)`.
+   - Purpose:
+     - after a stopped correction confirms a new event and the heading is updated,
+       let the robot actually depart in that direction before the next `FrontStop`
+       gate is allowed to stop it again
+   - Release rule:
+     - while active, `AcquireCorridor` skips the immediate `front < FrontStop`
+       re-entry path
+     - once the newly selected front direction is clear enough
+       (`front >= FrontStop`), the release guard clears automatically
+
+3. Applied the release guard to all three handling flows.
+   - Runtime:
+     - `updateExecutive()`
+   - Preview:
+     - `updatePreviewExecution()`
+   - Event tests:
+     - `updateEventTestRun()`
+
+4. The event is now executed immediately after correction instead of re-stopping.
+   - Old failing pattern:
+     - correction finishes
+     - new event/heading is selected
+     - `AcquireCorridor` immediately sees `front < FrontStop`
+     - robot falls back into correction
+   - New pattern:
+     - correction finishes
+     - new event/heading is selected
+     - one guarded release phase lets the robot move into the confirmed direction
+     - after the front clears, normal stop gating resumes
+
+5. Replaced the copied minimal workbook builder with an Excel-generated builder.
+   - New script:
+     - `build_v64_parameters_xlsx.ps1`
+   - The script uses installed Excel to write a normal `.xlsx` workbook with:
+     - header formatting
+     - frozen top row
+     - filter row
+     - wrapped columns
+   - This is meant to fix the previous "Excel isn't working" artifact issue.
+
+Special cases handled
+---------------------
+- Legacy dead-end stop:
+  - still disables correction-stage event override
+  - still aligns and then reverses as before
+  - now also clears `postCorrectionReleaseActive` before entering correction
+
+- Correction-stage event override:
+  - if left/right/T-junction/dead-end confirmation changes the latched event during
+    correction, the updated event is preserved through the correction exit and is
+    released into execution immediately after correction
+
+- Corridor reacquisition:
+  - once the newly selected front direction is no longer below `FrontStop`,
+    `postCorrectionReleaseActive` clears and the normal stop logic takes over again
+
+Assumptions made
+----------------
+- The main failure was caused by the immediate `AcquireCorridor` stop gate re-triggering
+  after correction, not by the correction PID itself.
+- The safest targeted fix is to guard only the first post-correction release instead of
+  weakening the stop logic globally.
+- Preview flow was kept behaviorally aligned with runtime/event-test flows even though it
+  does not physically drive the robot in the same way.
+
+Parameters added or used
+------------------------
+No new menu-editable parameters were added.
+
+Existing parameters used by the corrected behavior:
+- `FrontStop`
+- `Front Hold Ref`
+- `Front PID P`
+- `Front PID I`
+- `Front PID D`
+- `Turn Yaw Tol`
+- `Match N`
+- `Check gap`
+- `WallThreshold`
+- `DeadEndThreshold`
+- `2-wall P`
+- `2-wall D`
+- `IMU P`
+- `IMU I`
+
+New internal state / helper items
+---------------------------------
+- `postCorrectionReleaseActive`
+- `holdPostCorrectionRelease(...)`
+
+Functions and code sections modified
+------------------------------------
+- `struct ExecutiveState`
+  - added `postCorrectionReleaseActive`
+- `struct PreviewState`
+  - added `postCorrectionReleaseActive`
+- `struct EventTestState`
+  - added `postCorrectionReleaseActive`
+- `holdPostCorrectionRelease(...)`
+  - added
+- `beginExecution()`
+  - initializes the new release flag
+- `startPreviewExecution()`
+  - initializes the new release flag
+- `startEventTestRun()`
+  - initializes the new release flag
+- `stopEventTestRun()`
+  - resets the new release flag
+- `updatePreviewExecution()`
+  - clears the flag when entering stopped correction
+  - arms the flag when leaving correction
+  - honors the release guard in `AcquireCorridor`
+- `updateExecutive()`
+  - same runtime behavior added
+- `updateEventTestRun()`
+  - same event-test behavior added
+- `build_v64_parameters_xlsx.ps1`
+  - replaced with Excel COM workbook generation
+
+Workbook artifact changes
+-------------------------
+- Output workbook:
+  - `test_full_v64_execresume_parameters.xlsx`
+- Builder:
+  - `build_v64_parameters_xlsx.ps1`
+- The workbook now includes the new internal runtime flag:
+  - `postCorrectionReleaseActive`
+
+Verification notes
+------------------
+- Source review performed on all three affected navigation flows:
+  - preview
+  - runtime execution
+  - event test
+- Verified by source inspection that:
+  - correction exit now arms the post-correction release guard
+  - `AcquireCorridor` honors that guard before re-applying `FrontStop`
+  - the guard clears once the new front direction is no longer below `FrontStop`
+  - legacy dead-end correction still does not allow correction-stage overrides
+- Excel workbook generation path was changed to a true Excel SaveAs flow so the output is
+  a standard `.xlsx` workbook instead of a hand-packed archive.
+- Firmware compile was not run in this workspace because `arduino-cli` is not installed here.

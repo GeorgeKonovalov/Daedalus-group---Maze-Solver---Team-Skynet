@@ -1,0 +1,186 @@
+test_full_v65_postcorr_logic update log
+======================================
+
+Author
+------
+George Konovalov
+
+Date and time
+-------------
+2026-04-22 17:25:41 +01:00
+
+Base version
+------------
+test_full_v64_execresume
+
+Original lineage
+----------------
+v62_59v_back -> test_full_v63_stopconfirm -> test_full_v64_execresume -> test_full_v65_postcorr_logic
+
+New version
+-----------
+test_full_v65_postcorr_logic
+
+Purpose of update
+-----------------
+Replace the previous post-stop event handoff with the new requested runtime logic:
+
+1. while driving normally, do not commit left/right/T-junction turns before the stop
+2. when `front < FrontStop`, stop and correct first
+3. after correction is within error, determine the new event from the corrected pose
+4. then change heading immediately according to that confirmed event and route memory
+5. keep dead-end separate: dead-end correction first, then reverse, with no post-correction turn determination
+
+Summary of logic changes
+------------------------
+1. Runtime corridor handling no longer latches left/right/T-junction before the stop.
+   - In `updateExecutive()` / `NavState::Corridor`, the robot now:
+     - keeps moving forward with the existing PID logic
+     - ignores turn commitment until `front < FrontStop`
+     - still keeps finish handling unchanged through `tryHandleRuntimeFinish(...)`
+
+2. FrontStop now acts as the main gate for non-finish turn handling.
+   - Once `front < FrontStop`, runtime enters `NavState::FrontNormalize`
+   - If the legacy dead-end signature is already present at that gate, the stop is treated as dead-end immediately
+   - Otherwise runtime enters correction with `latchedEvent = Corridor`
+
+3. Runtime correction now happens before turn determination.
+   - In `NavState::FrontNormalize`, runtime continues to use:
+     - wall PID / appropriate wall references
+     - IMU yaw PID
+     - IMU lateral compensation / no-wall behavior as already implemented
+   - The robot is held in correction until `frontNormalizationComplete(...)` succeeds
+
+4. Added post-correction turn candidate selection.
+   - New helper:
+     - `postCorrectionTurnCandidate(...)`
+   - This helper only allows:
+     - `LeftTurn`
+     - `RightTurn`
+     - `TJunction`
+   - It explicitly ignores:
+     - `Start`
+     - `Finish`
+     - `DeadEnd`
+     - `Corridor`
+     - `SensorWait`
+
+5. The new event is now confirmed only after correction is complete.
+   - Once runtime is within front/yaw correction error:
+     - the corrected pose is sampled
+     - `postCorrectionTurnCandidate(...)` is fed into the existing confirmation counter logic
+     - when confirmed, runtime:
+       - stores the event
+       - resolves heading using `chooseHeadingForEvent(...)`
+       - applies route-memory handling for `TJunction`
+       - switches to the new heading immediately
+       - enters corridor reacquisition
+
+6. Dead-end behavior was kept separate as requested.
+   - Dead-end remains based on:
+     - front IR sensors
+     - front ultrasonic threshold
+   - If dead-end is active at the stop gate or becomes active during correction:
+     - runtime switches to dead-end mode
+     - performs correction only
+     - then reverses to the opposite heading
+     - no post-correction turn determination is used in that case
+
+7. Finish handling was preserved.
+   - `tryHandleRuntimeFinish(...)` remains unchanged
+   - Finish still force-saves the attempt and returns to the confirmation/start flow as implemented before
+
+8. Start handling was left untouched.
+   - `NavState::StartSeek` logic was not modified in this version
+
+Scope of this version
+---------------------
+- The requested runtime execution logic was updated in `updateExecutive()`
+- Preview and event-test handling were intentionally left structurally unchanged in this version to avoid changing their separate behaviors without explicit request
+
+Special cases handled
+---------------------
+- Legacy dead-end already present at `FrontStop`:
+  - correction only
+  - then reverse
+  - no turn-event determination after correction
+
+- Legacy dead-end becomes true during correction:
+  - runtime promotes the stop to dead-end
+  - resets event confirmation
+  - finishes correction in dead-end mode
+  - then reverses
+
+- Finish during runtime:
+  - unchanged from the previous version
+
+- Start corridor:
+  - unchanged from the previous version
+
+Assumptions made
+----------------
+- The main issue was that the previous logic still tried to decide/hand off turn events at the wrong phase of execution.
+- The requested fix applies specifically to real runtime execution, where motors and correction actually matter.
+- The safest targeted change was to modify runtime event timing in `updateExecutive()` rather than rewriting the whole architecture or changing start handling.
+
+Parameters added or used
+------------------------
+No new menu-editable parameters were added.
+
+Existing parameters used by the new runtime flow:
+- `FrontStop`
+- `Front Hold Ref`
+- `Front PID P`
+- `Front PID I`
+- `Front PID D`
+- `Turn Yaw Tol`
+- `WallThreshold`
+- `DeadEndThreshold`
+- `Match N`
+- `Check gap`
+- `2-wall P`
+- `2-wall D`
+- `IMU P`
+- `IMU I`
+
+New internal helper added
+-------------------------
+- `postCorrectionTurnCandidate(...)`
+
+Functions and code sections modified
+------------------------------------
+- `postCorrectionTurnCandidate(...)`
+  - added
+- `updateExecutive()`
+  - `NavState::Corridor`
+    - removed early runtime commitment of left/right/T-junction before stop
+    - now enters correction first at `FrontStop`
+  - `NavState::FrontNormalize`
+    - dead-end can still promote during correction
+    - correction must complete first
+    - new turn determination happens only after correction is within tolerance
+    - confirmed post-correction turn immediately updates heading and resumes execution
+
+- `build_v65_parameters_xlsx.ps1`
+  - version/file-name references updated to v65
+  - workbook notes updated to describe the new post-correction logic
+
+Workbook artifact changes
+-------------------------
+- Output workbook:
+  - `test_full_v65_postcorr_logic_parameters.xlsx`
+- Builder:
+  - `build_v65_parameters_xlsx.ps1`
+- No new tunable parameters were introduced in this version
+- The workbook notes were refreshed to reflect the new runtime logic
+
+Verification notes
+------------------
+- Source review performed on the runtime execution flow in `updateExecutive()`
+- Verified by source inspection that:
+  - non-dead-end turn events are no longer committed before `FrontStop`
+  - runtime now corrects first, then confirms left/right/T-junction after correction
+  - dead-end bypasses post-correction turn determination and still reverses
+  - finish handling remains unchanged
+  - start handling remains unchanged
+- Firmware compile was not run in this workspace because `arduino-cli` is not installed here.

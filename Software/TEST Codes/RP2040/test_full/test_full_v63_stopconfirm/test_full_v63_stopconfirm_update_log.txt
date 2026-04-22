@@ -1,0 +1,163 @@
+test_full_v63_stopconfirm update log
+====================================
+
+Author
+------
+George Konovalov
+
+Date and time
+-------------
+2026-04-22 15:45:40 +01:00
+
+Base version
+------------
+v62_59v_back
+
+New version
+-----------
+test_full_v63_stopconfirm
+
+Purpose of update
+-----------------
+Implement mandatory stop-at-FrontStop handling with post-stop correction plus correction-stage event confirmation, while preserving the original legacy dead-end trigger path and keeping the base file unchanged.
+
+Requested default values applied
+--------------------------------
+- 2-wall P: 0.25
+- 2-wall D: 0.02
+- IMU P: 3.9
+- IMU I: 1.7
+- Front Stop: 15.0 cm
+- Front PID P: 0.15
+- Front PID D: 0.04
+
+Summary of logic changes
+------------------------
+1. FrontStop now acts as a hard stop gate in live handling paths.
+   - Added explicit `front < FrontStop` stop checks in the preview, runtime, and event-test corridor/acquire handling flows.
+   - Existing approach-wall stop checks were aligned to the same strict `< FrontStop` rule.
+
+2. Post-stop correction now supports event confirmation during compensation.
+   - While the robot is in `NavState::FrontNormalize`, correction continues to run with `overallSpeedActual == 0`.
+   - During that same phase, left turn, right turn, and T-junction confirmation still use the same event source as before.
+
+3. Added correction-stage-only ultrasonic dead-end confirmation.
+   - New helper `correctionStageUltrasonicDeadEndDetected(...)` detects dead-end only when:
+     - front ultrasonic < wall threshold
+     - left ultrasonic < wall threshold
+     - right ultrasonic < wall threshold
+   - This helper is only consumed by `correctionStageCandidate(...)`.
+   - The normal running dead-end event recognition was not replaced.
+
+4. Legacy dead-end stops are protected from post-stop overrides.
+   - Added helper `legacyDeadEndStopTriggered(...)` based on:
+     - front ultrasonic < dead-end threshold
+     - both front IR sensors triggered
+   - If that legacy dead-end condition is the reason for entering `FrontNormalize`, the new correction-stage confirmation is disabled.
+   - In that case the robot only aligns, then keeps the intended opposite-direction dead-end behavior.
+
+5. Direct FrontStop-only stops now wait for a confirmed non-corridor result before release.
+   - If the robot enters `FrontNormalize` because it simply reached FrontStop without a previously latched turn/dead-end event, it enters with `latchedEvent = Corridor`.
+   - Correction completes physically as before, but the code will not leave the hold stage until a non-corridor event is confirmed during that correction stage.
+   - This prevents the robot from stopping, correcting, and then immediately resuming with no resolved event.
+
+6. Added per-run internal flag to control correction-stage confirmation.
+   - New state field: `correctionConfirmEnabled`
+   - Added to:
+     - `ExecutiveState`
+     - `PreviewState`
+     - `EventTestState`
+   - Meaning:
+     - `false` for legacy dead-end-triggered stops
+     - `true` for turn-triggered and plain FrontStop-triggered correction phases
+
+Special cases handled
+---------------------
+- Legacy dead-end trigger:
+  - correction only
+  - no correction-stage event override
+  - reverse direction after correction
+
+- Plain `front < FrontStop` stop without already confirmed event:
+  - correction starts immediately
+  - correction-stage confirmation runs
+  - release waits until a non-corridor event is confirmed
+
+- Turn-triggered stop:
+  - keeps the previous turn confirmation path
+  - still allows correction-stage confirmation to override with a newer confirmed left/right/T-junction or correction-stage dead-end
+
+Assumptions made
+----------------
+- The new correction-stage dead-end confirmation is intended only for the stopped compensation phase and should not alter normal corridor event classification.
+- Start-seek behavior was left structurally unchanged to avoid disturbing the existing start acquisition flow; the new always-stop rule was applied to the main moving navigation phases where stop/correction handling already exists (`Corridor`, `ApproachWall`, `AcquireCorridor`) plus the event-test and preview equivalents.
+- For plain FrontStop-triggered holds, the robot remains in correction until a non-corridor event is confirmed; this is intentional so the resumed behavior always has a resolved event target.
+
+Parameters added or used
+------------------------
+No new menu-editable parameters were added.
+
+Existing parameters reused by the new behavior:
+- `FrontStop`
+- `WallThreshold`
+- `Dead-end`
+- `Front Hold Ref`
+- `Front PID P`
+- `Front PID I`
+- `Front PID D`
+- `Turn Yaw Tol`
+- `Match N`
+- `Check gap`
+- 2-wall PID `P`
+- 2-wall PID `D`
+- `IMU P`
+- `IMU I`
+
+New internal state / helper items
+---------------------------------
+- `correctionConfirmEnabled`
+- `legacyDeadEndStopTriggered(...)`
+- `correctionStageUltrasonicDeadEndDetected(...)`
+- `correctionStageCandidate(...)`
+
+Functions and code sections modified
+------------------------------------
+- `struct RuntimeSettings`
+  - updated stored default values
+- `struct RuntimeConfig`
+  - updated runtime fallback defaults
+- `classifyCandidateEvent(...)`
+  - legacy dead-end threshold comparison aligned to strict `<`
+- `legacyDeadEndStopTriggered(...)`
+  - added
+- `correctionStageUltrasonicDeadEndDetected(...)`
+  - added
+- `correctionStageCandidate(...)`
+  - added
+- `beginExecution()`
+  - initializes correction confirmation state
+- `startPreviewExecution()`
+  - initializes correction confirmation state
+- `startEventTestRun()`
+  - initializes correction confirmation state
+- `stopEventTestRun()`
+  - resets correction confirmation state
+- `updatePreviewExecution()`
+  - added direct FrontStop entry into correction
+  - disabled correction-stage confirmation for legacy dead-end stops
+  - added correction-stage candidate filtering
+- `updateExecutive()`
+  - same behavior added for real execution
+- `updateEventTestRun()`
+  - same behavior added for event tests
+
+Verification notes
+------------------
+- Structural review performed on the new source file after patching.
+- Verified by source inspection that:
+  - legacy dead-end-triggered stops disable correction-stage confirmation
+  - correction-stage dead-end uses the new all-ultrasonic-blocked logic only during correction
+  - plain FrontStop entries now route into `FrontNormalize`
+  - left/right/T-junction confirmation paths remain intact and still use the prior candidate classification
+- Firmware compile was not run in this workspace because `arduino-cli` is not installed here.
+

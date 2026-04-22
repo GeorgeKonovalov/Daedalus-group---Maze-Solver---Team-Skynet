@@ -1,0 +1,168 @@
+test_full_v66_startcorr update log
+==================================
+
+Author
+------
+George Konovalov
+
+Date and time
+-------------
+2026-04-22 17:40:33 +01:00
+
+Base version
+------------
+test_full_v65_postcorr_logic
+
+Original lineage
+----------------
+v62_59v_back -> test_full_v63_stopconfirm -> test_full_v64_execresume -> test_full_v65_postcorr_logic -> test_full_v66_startcorr
+
+New version
+-----------
+test_full_v66_startcorr
+
+Purpose of update
+-----------------
+Insert a correction stage after Start confirmation and before the Start-speed ramp begins.
+
+Requested behavior now becomes:
+
+1. detect Start exactly as before
+2. once Start corridor is confirmed, do not jump directly into corridor/ramp
+3. enter correction first
+4. finish correction using the same wall/yaw alignment style already used for other stopped phases
+5. then restore `overallSpeedActual` to `Overall Start`
+6. only after that let the existing ramp bring speed up toward the configured `Overall`
+
+Summary of logic changes
+------------------------
+1. Start detection itself was preserved.
+   - `NavState::StartSeek` still uses the same Start corridor confirmation logic.
+   - No changes were made to the Start signature/detection criteria.
+
+2. Start confirmation no longer jumps straight into corridor driving.
+   - Runtime, preview, and event-test Start flows now:
+     - latch `EventType::Start`
+     - keep the current heading
+     - enter `NavState::FrontNormalize`
+   - This inserts a dedicated correction step before the normal post-Start release.
+
+3. Start now uses correction-only normalization.
+   - New helper:
+     - `eventUsesFrontHold(...)`
+   - `EventType::Start` is treated like a correction-only event:
+     - wall PID remains available if walls exist
+     - IMU yaw compensation remains available
+     - front-distance hold is not used
+   - This means Start alignment settles pose/orientation first, without pushing against `Front Hold Ref`.
+
+4. Runtime Start correction cannot be promoted into a dead-end while that Start correction is already in progress.
+   - In runtime `NavState::FrontNormalize`, the legacy dead-end promotion path now excludes:
+     - `EventType::Start`
+   - This keeps the Start handoff deterministic and avoids a close front signature hijacking the newly added Start correction stage.
+
+5. After Start correction finishes, the ramp is reseeded from the configured Start speed.
+   - Once Start correction is within tolerance:
+     - runtime/event-test/preview restore heading
+     - reset drive PID state
+     - call `initializeRuntimeOverallSpeed(true)`
+     - enter `NavState::AcquireCorridor`
+   - Because `initializeRuntimeOverallSpeed(true)` reloads `overallSpeedActual` from `Overall Start`, the existing `Overall Ramp K` behavior now begins only after correction completes.
+
+6. Existing turn/stop logic was left intact.
+   - Left/Right/T-junction/dead-end behavior from v65 remains unchanged.
+   - The new change is limited to the Start-to-run transition.
+
+Scope of this version
+---------------------
+- Runtime `StartSeek -> FrontNormalize -> AcquireCorridor` handoff updated
+- Preview Start flow updated the same way for consistency
+- Event-test Start flow updated the same way for consistency
+- Front-normalization helper logic updated so Start uses wall/yaw correction only
+
+Special cases handled
+---------------------
+- Start confirmed while sensors are stable:
+  - correction runs first
+  - ramp starts only after correction completes
+
+- Start correction with no walls:
+  - wall correction stays zero
+  - IMU yaw behavior remains whatever the existing enable/config allows
+
+- Start correction with a close front reading:
+  - Start normalization does not use front-distance hold
+  - runtime dead-end promotion is explicitly blocked while Start correction is active
+
+Assumptions made
+----------------
+- "Before the ramp after the start event is finished do correction and then go using the ramp" means:
+  - keep Start detection unchanged
+  - insert correction after Start confirmation
+  - only then allow the configured Start-speed ramp to resume
+
+- The safest minimal change was to reuse the existing stopped-correction phase instead of creating a new state.
+
+Parameters added or used
+------------------------
+No new menu-editable parameters were added in this version.
+
+Existing parameters now used by the revised Start handoff:
+- `Overall Start`
+- `Overall Ramp K`
+- `FrontStop`
+- `Front Hold Ref`
+- `Turn Yaw Tol`
+- `1-wall P`
+- `1-wall D`
+- `2-wall P`
+- `2-wall D`
+- `IMU P`
+- `IMU I`
+
+New internal helper added
+-------------------------
+- `eventUsesFrontHold(...)`
+
+Functions and code sections modified
+------------------------------------
+- `eventUsesFrontHold(...)`
+  - added
+- `frontNormalizationComplete(...)`
+  - Start now follows correction-only completion criteria
+- `runFrontNormalization(...)`
+  - Start now skips front-distance hold and uses only wall/yaw correction
+- `updateExecutive()`
+  - `NavState::StartSeek`
+    - Start confirmation now enters `FrontNormalize` instead of `Corridor`
+  - `NavState::FrontNormalize`
+    - Start correction completion now reseeds `overallSpeedActual` from `Overall Start`
+    - runtime then enters `AcquireCorridor` so the normal ramp resumes after correction
+    - Start is excluded from runtime dead-end promotion during this phase
+- `updatePreviewExecution()`
+  - preview Start handoff updated to match runtime behavior
+- `updateEventTestRun()`
+  - event-test Start handoff updated to match runtime behavior
+
+Workbook artifact changes
+-------------------------
+- Output workbook:
+  - `test_full_v66_startcorr_parameters.xlsx`
+- Builder:
+  - `build_v66_parameters_xlsx.ps1`
+- Workbook notes refreshed to reflect the new Start correction -> ramp sequence
+
+Verification notes
+------------------
+- Source review performed on:
+  - Start runtime handoff
+  - Start preview handoff
+  - Start event-test handoff
+  - front-normalization helper behavior
+- Verified by source inspection that:
+  - Start confirmation no longer enters corridor directly
+  - Start now corrects first
+  - Start correction does not use front-distance hold
+  - `overallSpeedActual` is reset to `Overall Start` before ramp resumes
+  - turn/dead-end logic from v65 remains intact outside the Start handoff
+- Firmware compile was not run in this workspace because `arduino-cli` is not installed here.

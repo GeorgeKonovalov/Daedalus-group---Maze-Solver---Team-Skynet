@@ -1,0 +1,199 @@
+test_full_v67_deadend_ultra update log
+======================================
+
+Author
+------
+George Konovalov
+
+Date and time
+-------------
+2026-04-22 17:51:52 +01:00
+
+Base version
+------------
+test_full_v66_startcorr
+
+Original lineage
+----------------
+v62_59v_back -> test_full_v63_stopconfirm -> test_full_v64_execresume -> test_full_v65_postcorr_logic -> test_full_v66_startcorr -> test_full_v67_deadend_ultra
+
+New version
+-----------
+test_full_v67_deadend_ultra
+
+Purpose of update
+-----------------
+Fix dead-end overtriggering while the robot is already stopped and correcting for some other event.
+
+Requested behavior now becomes:
+
+1. while driving normally, the original dead-end trigger still works
+2. if that original dead-end was already true before correction starts, keep the normal dead-end behavior
+3. once the robot is already stopped for some other event, do not let the old front-IR dead-end rule hijack the stop
+4. after correction completes, use a new dead-end override rule:
+   - front ultrasonic < WallThreshold
+   - left ultrasonic < WallThreshold
+   - right ultrasonic < WallThreshold
+   - rear ultrasonic is ignored
+
+How dead-end worked before this update
+--------------------------------------
+There were two different dead-end paths in the code:
+
+1. Legacy runtime dead-end trigger while driving
+   - `legacyDeadEndStopTriggered(...)`
+   - condition:
+     - `front < DeadEndThreshold`
+     - both front IR sensors triggered
+   - this legacy rule was used:
+     - by normal event classification
+     - at the FrontStop gate before correction starts
+
+2. Correction-stage all-ultrasonic dead-end helper
+   - `correctionStageUltrasonicDeadEndDetected(...)`
+   - condition:
+     - `front < WallThreshold`
+     - `left < WallThreshold`
+     - `right < WallThreshold`
+   - this helper existed, but runtime still had a legacy dead-end promotion inside `NavState::FrontNormalize`
+
+Why it was overtriggering
+-------------------------
+While the robot was already stopped for left/right/T-junction correction, runtime still allowed the old front-IR dead-end rule to promote the event to dead-end inside `NavState::FrontNormalize`.
+
+That meant a close stop near some other event could still be hijacked by:
+- front ultrasonic under `DeadEndThreshold`
+- both front IR sensors triggered
+
+Summary of logic changes
+------------------------
+1. Preserved the original legacy dead-end trigger for normal driving.
+   - `classifyCandidateEvent(...)` is unchanged
+   - `legacyDeadEndStopTriggered(...)` is unchanged
+   - if dead-end is already true before correction begins, it still behaves as dead-end immediately
+
+2. Removed dead-end takeover during the active correction phase.
+   - Runtime no longer promotes a non-dead-end stop into dead-end through the old front-IR signature while already in `NavState::FrontNormalize`
+
+3. Deferred non-legacy dead-end override until correction is complete.
+   - New helper:
+     - `postCorrectionDeadEndTriggered(...)`
+   - This helper allows dead-end override only after correction and only if:
+     - front, left, and right ultrasonics are all below `WallThreshold`
+
+4. Dead-end is no longer confirmed during correction through the generic correction candidate path.
+   - `correctionStageCandidate(...)` now keeps only:
+     - `Finish`
+     - `LeftTurn`
+     - `RightTurn`
+     - `TJunction`
+   - dead-end is intentionally excluded from correction-time confirmation
+
+5. Added the new post-correction dead-end rule to all three execution paths.
+   - Runtime:
+     - after correction completes, dead-end override is checked before turn selection proceeds
+   - Preview:
+     - same post-correction ultrasonic-only dead-end override added for consistency
+   - Event test:
+     - same post-correction ultrasonic-only dead-end override added for consistency
+
+Behavior after this update
+--------------------------
+Normal driving:
+- dead-end still triggers the old way:
+  - front ultrasonic < `DeadEndThreshold`
+  - both front IR triggered
+
+Stopped correction for another event:
+- the old dead-end IR rule is ignored
+- only after correction completes, dead-end can override if:
+  - front ultrasonic < `WallThreshold`
+  - left ultrasonic < `WallThreshold`
+  - right ultrasonic < `WallThreshold`
+
+Special cases handled
+---------------------
+- Dead-end already true before correction starts:
+  - unchanged
+  - correction only
+  - then opposite-direction handling
+
+- Start correction:
+  - still excluded from dead-end override during the Start-specific correction phase
+
+- Turn corrections (Left/Right/T-junction):
+  - no longer hijacked mid-correction by front IR dead-end signature
+  - after correction, the new ultrasonic-only dead-end check can still override if the geometry is truly blocked
+
+Assumptions made
+----------------
+- The overtrigger the user described came from dead-end being able to take over while the robot was already stopped for another event.
+- The requested safe interpretation was:
+  - keep the old dead-end trigger while driving
+  - move the alternate dead-end decision to after correction
+  - use only front/left/right ultrasonic blockage there
+
+Parameters added or used
+------------------------
+No new menu-editable parameters were added.
+
+Relevant existing parameters:
+- `DeadEndThreshold`
+- `WallThreshold`
+- `FrontStop`
+- `Match N`
+- `Check gap`
+
+Important parameter notes
+-------------------------
+- `DeadEndThreshold`
+  - still governs the legacy dead-end trigger while driving
+- `WallThreshold`
+  - now governs the post-correction ultrasonic-only dead-end override
+- `Match N`
+  - still applies to turn confirmation during correction
+  - no longer governs dead-end takeover after correction in this version
+
+New internal helper added
+-------------------------
+- `postCorrectionDeadEndTriggered(...)`
+
+Functions and code sections modified
+------------------------------------
+- `correctionStageCandidate(...)`
+  - dead-end removed from correction-time confirmation
+- `postCorrectionDeadEndTriggered(...)`
+  - added
+- `updateExecutive()`
+  - `NavState::FrontNormalize`
+    - removed legacy front-IR dead-end promotion while actively correcting
+    - added post-correction ultrasonic-only dead-end override
+- `updatePreviewExecution()`
+  - `NavState::FrontNormalize`
+    - added the same post-correction ultrasonic-only dead-end override
+- `updateEventTestRun()`
+  - `NavState::FrontNormalize`
+    - added the same post-correction ultrasonic-only dead-end override
+
+Workbook artifact changes
+-------------------------
+- Output workbook:
+  - `test_full_v67_deadend_ultra_parameters.xlsx`
+- Builder:
+  - `build_v67_parameters_xlsx.ps1`
+- Workbook notes refreshed to explain the split between:
+  - legacy dead-end while driving
+  - ultrasonic-only dead-end after correction
+
+Verification notes
+------------------
+- Source review performed on:
+  - legacy dead-end trigger
+  - correction-stage dead-end handling
+  - runtime/preview/event-test FrontNormalize paths
+- Verified by source inspection that:
+  - old dead-end trigger still exists before correction
+  - runtime no longer promotes dead-end mid-correction using front IR
+  - after correction, dead-end override now uses only front/left/right ultrasonics against `WallThreshold`
+  - rear ultrasonic is not used in the new post-correction dead-end rule
+- Firmware compile was not run in this workspace because `arduino-cli` is not installed here.
