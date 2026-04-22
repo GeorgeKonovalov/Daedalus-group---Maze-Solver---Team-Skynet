@@ -122,8 +122,8 @@ struct RuntimeSettings {
   int approachSpeed_x100 = 28;
   int leftDriveScale_x100 = 100;
   int rightDriveScale_x100 = 100;
-  int servoStopFL_x1000 = 90050;
-  int servoStopFR_x1000 = 89800;
+  int servoStopFL_x1000 = 90629;
+  int servoStopFR_x1000 = 90900;
   int servoStopRR_x1000 = 89800;
   int servoStopRL_x1000 = 90000;
   int servoDeadbandFL_x100 = 0;
@@ -131,7 +131,7 @@ struct RuntimeSettings {
   int servoDeadbandRR_x100 = 0;
   int servoDeadbandRL_x100 = 0;
 
-  int frontStopDistance_x100 = 1000;
+  int frontStopDistance_x100 = 1300;
   int frontHoldReference_x100 = 350;
   int frontPidP_x1000 = 500;
   int frontPidI_x1000 = 0;
@@ -192,8 +192,8 @@ struct RuntimeConfig {
   float approachSpeed = 0.28f;
   float leftDriveScale = 1.0f;
   float rightDriveScale = 1.0f;
-  float servoStopFL = 90.050f;
-  float servoStopFR = 89.800f;
+  float servoStopFL = 90.629f;
+  float servoStopFR = 90.900f;
   float servoStopRR = 89.800f;
   float servoStopRL = 90.000f;
   float servoDeadbandFL = 0.0f;
@@ -201,7 +201,7 @@ struct RuntimeConfig {
   float servoDeadbandRR = 0.0f;
   float servoDeadbandRL = 0.0f;
 
-  float frontStopDistanceCm = 10.0f;
+  float frontStopDistanceCm = 13.0f;
   float frontHoldReferenceCm = 3.5f;
   float frontPidP = 0.5f;
   float frontPidI = 0.0f;
@@ -628,8 +628,17 @@ Servo servoRR;
 Servo servoRL;
 
 volatile int32_t gEncoderRawDelta = 0;
+volatile bool gButtonIrqPending = false;
+volatile uint32_t gButtonIrqTimeMs = 0;
+volatile uint32_t gButtonIrqCount = 0;
 
 ButtonState gButton;
+// Debug counters are intentionally lightweight so they can be inspected in a
+// watch window without adding serial spam or display-side timing noise.
+uint32_t gButtonAcceptedPressCount = 0;
+uint32_t gButtonAcceptedReleaseCount = 0;
+uint32_t gButtonShortPressCount = 0;
+uint32_t gButtonLongPressCount = 0;
 DigitEditor gDigitEditor;
 PlannerState gPlanner;
 ExecutiveState gExecutive;
@@ -708,6 +717,8 @@ Screen gLastDrawnScreen = Screen::RunScreen;
 // Forward declarations
 // ======================================================
 void onEncoderEdge();
+void onButtonEdge();
+static void serviceButtonInterrupt();
 
 void commitRuntimeConfig();
 void resetPid();
@@ -790,6 +801,7 @@ static bool applyCompensationEventOverride(const PerceptionFrame& frame,
                                            TurnChoice configuredTurn,
                                            bool& leaveNormalize,
                                            bool& finishNow);
+static EventType compensationConfirmCandidate(EventType candidate);
 
 bool wallPidUsageEnabled();
 float shapedMagnitude(float magnitude, float interpretLimit);
@@ -1643,13 +1655,41 @@ void onEncoderEdge() {
   }
 }
 
+void onButtonEdge() {
+  // ISR stays intentionally tiny: just remember that a candidate edge
+  // happened and when. The full debounce and short/long classification
+  // remains in the normal main-loop path.
+  gButtonIrqPending = true;
+  gButtonIrqTimeMs = millis();
+  gButtonIrqCount++;
+}
+
+static void serviceButtonInterrupt() {
+  bool irqPending = false;
+  uint32_t irqTimeMs = 0;
+
+  noInterrupts();
+  irqPending = gButtonIrqPending;
+  irqTimeMs = gButtonIrqTimeMs;
+  gButtonIrqPending = false;
+  interrupts();
+
+  if (!irqPending) return;
+
+  gButton.lastRawLevel = digitalRead(ENC_BTN_PIN);
+  gButton.lastDebounceMs = irqTimeMs;
+}
+
 ButtonEvent readButtonEvent(bool allowInput) {
+  serviceButtonInterrupt();
+
   bool rawLevel = digitalRead(ENC_BTN_PIN);
   uint32_t now = millis();
 
   if (!allowInput) {
     gButton.lastRawLevel = rawLevel;
     gButton.stableLevel = rawLevel;
+    gButton.lastDebounceMs = now;
     gButton.longPressReported = false;
     if (rawLevel == LOW) {
       gButton.pressedAtMs = now;
@@ -1659,20 +1699,19 @@ ButtonEvent readButtonEvent(bool allowInput) {
 
   ButtonEvent result = ButtonEvent::None;
 
-  if (rawLevel != gButton.lastRawLevel) {
-    gButton.lastRawLevel = rawLevel;
-    gButton.lastDebounceMs = now;
-  }
-
   if ((now - gButton.lastDebounceMs) >= BUTTON_DEBOUNCE_MS) {
-    if (gButton.stableLevel != rawLevel) {
-      gButton.stableLevel = rawLevel;
-      if (rawLevel == LOW) {
+    if (gButton.stableLevel != gButton.lastRawLevel &&
+        rawLevel == gButton.lastRawLevel) {
+      gButton.stableLevel = gButton.lastRawLevel;
+      if (gButton.stableLevel == LOW) {
         gButton.pressedAtMs = now;
         gButton.longPressReported = false;
+        gButtonAcceptedPressCount++;
       } else {
+        gButtonAcceptedReleaseCount++;
         if (!gButton.longPressReported) {
           result = ButtonEvent::ShortPress;
+          gButtonShortPressCount++;
         }
       }
     }
@@ -1682,6 +1721,7 @@ ButtonEvent readButtonEvent(bool allowInput) {
     if ((now - gButton.pressedAtMs) >= BUTTON_LONGPRESS_MS) {
       gButton.longPressReported = true;
       result = ButtonEvent::LongPress;
+      gButtonLongPressCount++;
     }
   }
 
@@ -3336,7 +3376,8 @@ void updatePreviewExecution() {
         EventType confirmed = EventType::Idle;
         bool leaveNormalize = false;
         bool finishNow = false;
-        if (updateEventConfirmState(gPreviewRun.eventConfirm, frame.candidate, confirmed)) {
+        EventType compensationCandidate = compensationConfirmCandidate(frame.candidate);
+        if (updateEventConfirmState(gPreviewRun.eventConfirm, compensationCandidate, confirmed)) {
           (void)applyCompensationEventOverride(frame,
                                               confirmed,
                                               gPreviewRun.heading,
@@ -3497,7 +3538,8 @@ void updateExecutive() {
         EventType confirmed = EventType::Idle;
         bool leaveNormalize = false;
         bool finishNow = false;
-        if (updateEventConfirmState(gExecutive.eventConfirm, frame.candidate, confirmed)) {
+        EventType compensationCandidate = compensationConfirmCandidate(frame.candidate);
+        if (updateEventConfirmState(gExecutive.eventConfirm, compensationCandidate, confirmed)) {
           (void)applyCompensationEventOverride(frame,
                                               confirmed,
                                               gExecutive.heading,
@@ -3600,6 +3642,26 @@ static bool updateEventConfirmState(EventConfirmState& state, EventType candidat
   }
 
   return false;
+}
+
+static EventType compensationConfirmCandidate(EventType candidate) {
+  switch (candidate) {
+    case EventType::LeftTurn:
+    case EventType::RightTurn:
+    case EventType::TJunction:
+      return candidate;
+
+    case EventType::Idle:
+    case EventType::Finish:
+    case EventType::DeadEnd:
+    case EventType::Start:
+    case EventType::TJunctionStraight:
+    case EventType::Corridor:
+    case EventType::SensorWait:
+    case EventType::SafetyStop:
+    default:
+      return EventType::Idle;
+  }
 }
 
 static bool applyCompensationEventOverride(const PerceptionFrame& frame,
@@ -4823,7 +4885,8 @@ void updateEventTestRun() {
         EventType confirmed = EventType::Idle;
         bool leaveNormalize = false;
         bool finishNow = false;
-        if (updateEventConfirmState(gEventTestRun.eventConfirm, frame.candidate, confirmed)) {
+        EventType compensationCandidate = compensationConfirmCandidate(frame.candidate);
+        if (updateEventConfirmState(gEventTestRun.eventConfirm, compensationCandidate, confirmed)) {
           (void)applyCompensationEventOverride(frame,
                                               confirmed,
                                               gEventTestRun.heading,
@@ -5971,6 +6034,14 @@ void setup() {
   pinMode(ENC_A_PIN, INPUT_PULLUP);
   pinMode(ENC_B_PIN, INPUT_PULLUP);
   pinMode(ENC_BTN_PIN, INPUT_PULLUP);
+  uint32_t nowMs = millis();
+  bool initialButtonLevel = digitalRead(ENC_BTN_PIN);
+  gButton.stableLevel = initialButtonLevel;
+  gButton.lastRawLevel = initialButtonLevel;
+  gButton.lastDebounceMs = nowMs;
+  gButton.pressedAtMs = nowMs;
+  gButton.longPressReported = false;
+  gButtonIrqTimeMs = nowMs;
 
   pinMode(PIN_IR_FL, INPUT);
   pinMode(PIN_IR_FR, INPUT);
@@ -5992,6 +6063,7 @@ void setup() {
   stopAll();
 
   attachInterrupt(digitalPinToInterrupt(ENC_A_PIN), onEncoderEdge, CHANGE); //interrupt for the digipot 
+  attachInterrupt(digitalPinToInterrupt(ENC_BTN_PIN), onButtonEdge, CHANGE);
 
   workingSettings = activeSettings; //transition of the 
   commitRuntimeConfig();
