@@ -979,20 +979,13 @@ void stopAll() {
 }
 
 void drive(float Vx, float Vy, float W) {
-  float fl = Vy + Vx + W;
-  float fr = Vy - Vx - W;
-  float rr = Vy + Vx - W;
-  float rl = Vy - Vx + W;
+  float FlRr = Vy + Vx + W;
+  float FrRl = Vy - Vx - W;
 
-  normalize(fl, fr, rr, rl);
-  fl *= GAIN_FL;  fr *= GAIN_FR;
-  rr *= GAIN_RR;  rl *= GAIN_RL;
-  normalize(fl, fr, rr, rl);
-
-  writeCRServo(S_FL, STOP_FL, RANGE_FL, INV_FL, fl);
-  writeCRServo(S_FR, STOP_FR, RANGE_FR, INV_FR, fr);
-  writeCRServo(S_RR, STOP_RR, RANGE_RR, INV_RR, rr);
-  writeCRServo(S_RL, STOP_RL, RANGE_RL, INV_RL, rl);
+  writeCRServo(S_FL, STOP_FL, RANGE_FL, INV_FL, FlRr*GAIN_FL);
+  writeCRServo(S_FR, STOP_FR, RANGE_FR, INV_FR, FrRl*GAIN_FR);
+  writeCRServo(S_RR, STOP_RR, RANGE_RR, INV_RR, FlRr*GAIN_RR);
+  writeCRServo(S_RL, STOP_RL, RANGE_RL, INV_RL, FrRl*GAIN_RL);
 }
 
 // ======================================================
