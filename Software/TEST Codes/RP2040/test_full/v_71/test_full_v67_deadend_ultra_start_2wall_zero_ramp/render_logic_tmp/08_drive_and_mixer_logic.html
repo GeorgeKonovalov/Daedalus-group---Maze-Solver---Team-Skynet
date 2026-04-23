@@ -1,0 +1,81 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Drive And Mixer Logic</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;lateralCmd vx&quot;] --&gt; D[&quot;Robot-frame mixer&quot;]
+  B[&quot;forwardCmd vy&quot;] --&gt; D
+  C[&quot;rotationCmd w&quot;] --&gt; D
+  D --&gt; E[&quot;Translation base: basePlus = vy + vx; baseMinus = vy - vx&quot;]
+  E --&gt; F[&quot;Normalize base translation if needed&quot;]
+  F --&gt; G[&quot;Scale base by overallSpeedActual&quot;]
+  D --&gt; H[&quot;Compensation terms from wall, front, and IMU lateral&quot;]
+  H --&gt; I[&quot;Clamp compensation toward zero so it can reduce or stop translation but not reverse it&quot;]
+  I --&gt; J[&quot;Apply left and right drive scales&quot;]
+  C --&gt; K[&quot;Add rotational spin pattern&quot;]
+  J --&gt; L[&quot;Wheel commands FL, FR, RR, RL&quot;]
+  K --&gt; L
+  L --&gt; M[&quot;Clamp/normalize full wheel envelope&quot;]
+  M --&gt; N[&quot;writeWheelCommand&quot;]
+  N --&gt; O{&quot;abs(command) &lt;= wheel deadband?&quot;}
+  O --&gt;|Yes| P[&quot;Write calibrated wheel stop center&quot;]
+  O --&gt;|No| Q[&quot;Apply inversion, range, and servo angle output&quot;]</div>
+  </div>
+</body>
+</html>

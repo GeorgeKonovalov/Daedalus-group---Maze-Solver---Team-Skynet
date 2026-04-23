@@ -1,0 +1,91 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PID Logic Selection</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Perception frame with averaged left and right ultrasonic distances&quot;] --&gt; B{&quot;Left &lt;= WallThreshold?&quot;}
+  B --&gt;|Yes| C{&quot;Right &lt;= WallThreshold?&quot;}
+  B --&gt;|No| D{&quot;Right &lt;= WallThreshold?&quot;}
+  C --&gt;|Yes| E[&quot;PID source: TwoWall&quot;]
+  C --&gt;|No| F[&quot;PID source: OneWallLeft&quot;]
+  D --&gt;|Yes| G[&quot;PID source: OneWallRight&quot;]
+  D --&gt;|No| H[&quot;PID source: None / NoWalls&quot;]
+  E --&gt; I[&quot;stabilizedPidSource&quot;]
+  F --&gt; I
+  G --&gt; I
+  H --&gt; I
+  I --&gt; J{&quot;Wall PID enabled?&quot;}
+  J --&gt;|No| K[&quot;Wall correction = 0&quot;]
+  J --&gt;|Yes| L{&quot;Active source is None?&quot;}
+  L --&gt;|No| M[&quot;computeWallCorrection&quot;]
+  M --&gt; N{&quot;TwoWall or OneWall?&quot;}
+  N --&gt;|TwoWall| O[&quot;2-wall scaled error and 2-wall PID&quot;]
+  N --&gt;|OneWall| P[&quot;1-wall target error and 1-wall PID&quot;]
+  L --&gt;|Yes| Q[&quot;Wall correction = 0&quot;]
+  Q --&gt; R{&quot;IMU lateral enabled and no walls?&quot;}
+  R --&gt;|Yes| S[&quot;IMU lateral compensation becomes lateral command&quot;]
+  R --&gt;|No| T[&quot;No lateral correction&quot;]
+  K --&gt; U[&quot;Final lateral command&quot;]
+  O --&gt; U
+  P --&gt; U
+  S --&gt; U
+  T --&gt; U</div>
+  </div>
+</body>
+</html>

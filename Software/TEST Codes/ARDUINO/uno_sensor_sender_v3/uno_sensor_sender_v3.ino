@@ -81,19 +81,14 @@ void setup() {
     Serial.println("Sensor Uno Ready");
     delay(500);
 }
-
 // ===== MAIN LOOP =====
-void loop() {
-    // Sequential reads with inter-sensor delays to prevent cross-talk
+void loop() {// Sequential reads with inter-sensor delays to prevent cross-talk
     float distN = readUltrasonic(ECHO_N);
     delay(INTER_DELAY);
-
     float distE = readUltrasonic(ECHO_E);
     delay(INTER_DELAY);
-
     float distS = readUltrasonic(ECHO_S);
     delay(INTER_DELAY);
-
     float distW = readUltrasonic(ECHO_W);
     delay(INTER_DELAY);
     // Send over UART in the agreed protocol format
@@ -105,7 +100,6 @@ void loop() {
     Serial.print(distS, 1);
     Serial.print(",D4:");
     Serial.println(distW, 1);
-
     // At 115200 baud the packet finishes much faster than before, so keep
     // a short quiet gap here to avoid retriggering the shared ultrasonic
     // array too aggressively on the next loop.

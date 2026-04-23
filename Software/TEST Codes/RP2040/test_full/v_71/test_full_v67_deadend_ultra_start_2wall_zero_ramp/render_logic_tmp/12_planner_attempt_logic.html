@@ -1,0 +1,88 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Planner Attempt Logic</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Start confirmation requested&quot;] --&gt; B{&quot;Route mode is Sequence?&quot;}
+  B --&gt;|No| C[&quot;Use selected mode directly&quot;]
+  B --&gt;|Yes| D{&quot;Sequence slot&quot;}
+  D --&gt;|0| E[&quot;Attempt Right first&quot;]
+  D --&gt;|1| F[&quot;Attempt Left second&quot;]
+  D --&gt;|2| G[&quot;Selection attempt&quot;]
+  G --&gt; H{&quot;Right and Left records exist?&quot;}
+  H --&gt;|No| I[&quot;Planner error: Need R+L first&quot;]
+  H --&gt;|Yes| J{&quot;Both records had dead-end?&quot;}
+  J --&gt;|Yes| K[&quot;Planner error: both dead-end&quot;]
+  J --&gt;|No| L{&quot;Only right had dead-end?&quot;}
+  L --&gt;|Yes| M[&quot;Choose Left&quot;]
+  L --&gt;|No| N{&quot;Only left had dead-end?&quot;}
+  N --&gt;|Yes| O[&quot;Choose Right&quot;]
+  N --&gt;|No| P{&quot;Right time &lt;= Left time?&quot;}
+  P --&gt;|Yes| Q[&quot;Choose Right&quot;]
+  P --&gt;|No| R[&quot;Choose Left&quot;]
+  C --&gt; S[&quot;beginExecution&quot;]
+  E --&gt; S
+  F --&gt; S
+  M --&gt; S
+  O --&gt; S
+  Q --&gt; S
+  R --&gt; S</div>
+  </div>
+</body>
+</html>

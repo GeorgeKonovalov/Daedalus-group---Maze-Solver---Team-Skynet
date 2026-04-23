@@ -1,0 +1,87 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>1. System architecture</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart LR
+  UI[&quot;Encoder + Button + OLED UI&quot;] --&gt; CFG[&quot;workingSettings / activeSettings / gCfg&quot;]
+  CFG --&gt; EXEC[&quot;Runtime State Machine&quot;]
+  CFG --&gt; TEST[&quot;Preview + Event-Test Runners&quot;]
+
+  IR[&quot;IR Sensors&quot;] --&gt; PER[&quot;Perception Frame&quot;]
+  US[&quot;UART Ultrasonic Stream&quot;] --&gt; PER
+  IMU[&quot;LSM6DSOX IMU&quot;] --&gt; PER
+
+  PER --&gt; EVT[&quot;Event Classification&quot;]
+  PER --&gt; PIDSEL[&quot;PID Source Selection&quot;]
+
+  EVT --&gt; EXEC
+  PIDSEL --&gt; CTRL[&quot;Wall PID + IMU Yaw PID + IMU Lateral PID + Front PID&quot;]
+  EXEC --&gt; CTRL
+  TEST --&gt; CTRL
+
+  CTRL --&gt; MIX[&quot;Omni X-Drive Mixer&quot;]
+  CFG --&gt; MIX
+  MIX --&gt; SERVO[&quot;Per-Wheel Servo Output + Neutral Deadband&quot;]
+  SERVO --&gt; ROBOT[&quot;Robot Motion&quot;]
+  ROBOT --&gt; IR
+  ROBOT --&gt; US
+  ROBOT --&gt; IMU</div>
+  </div>
+</body>
+</html>

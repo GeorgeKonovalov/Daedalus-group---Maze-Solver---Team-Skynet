@@ -1,0 +1,83 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Menu Architecture</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Root Menu&quot;] --&gt; B[&quot;Start Confirmation&quot;]
+  A --&gt; C[&quot;Start Settings&quot;]
+  A --&gt; D[&quot;Settings&quot;]
+  A --&gt; E[&quot;PID&quot;]
+  A --&gt; F[&quot;IMU PID&quot;]
+  A --&gt; G[&quot;PID Test&quot;]
+  A --&gt; H[&quot;Motor Tune&quot;]
+  A --&gt; I[&quot;Event Test&quot;]
+  A --&gt; J[&quot;Sensor Monitor&quot;]
+  A --&gt; K[&quot;IR Test&quot;]
+  A --&gt; L[&quot;Ultrasonic Test&quot;]
+  D --&gt; M[&quot;Motion settings: speed, front stop, wall thresholds, confirmation&quot;]
+  E --&gt; N[&quot;2-wall PID, 1-wall PID, deadbands, scales, filter&quot;]
+  F --&gt; O[&quot;Yaw PID, lateral IMU PID, yaw error test&quot;]
+  H --&gt; P[&quot;Drive scales and per-wheel servo stop/deadband&quot;]
+  I --&gt; Q[&quot;Event selection&quot;]
+  Q --&gt; R[&quot;Event config: shared PID, IMU, speed, front correction settings&quot;]
+  R --&gt; S[&quot;Event run screen&quot;]
+  J --&gt; T[&quot;Live heading-relative ultrasonic and PID source&quot;]</div>
+  </div>
+</body>
+</html>

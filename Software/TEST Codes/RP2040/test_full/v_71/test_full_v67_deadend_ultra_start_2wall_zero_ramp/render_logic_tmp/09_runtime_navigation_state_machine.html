@@ -1,0 +1,92 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Runtime Navigation State Machine</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Idle / menu&quot;] --&gt; B[&quot;Start Confirmation&quot;]
+  B --&gt; C{&quot;Start accepted?&quot;}
+  C --&gt;|No| A
+  C --&gt;|Yes| D[&quot;StartCorridor&quot;]
+  D --&gt; E[&quot;Start correction with PID active&quot;]
+  E --&gt; F{&quot;Correction complete?&quot;}
+  F --&gt;|No| E
+  F --&gt;|Yes| G[&quot;Corridor driving with speed ramp&quot;]
+  G --&gt; H{&quot;Ultrasonic valid?&quot;}
+  H --&gt;|No| I[&quot;SensorWait / stopAll&quot;]
+  I --&gt; H
+  H --&gt;|Yes| J{&quot;Event candidate&quot;}
+  J --&gt;|Corridor or T-straight| G
+  J --&gt;|Left / Right / TJ| K[&quot;Approach front wall&quot;]
+  K --&gt; L{&quot;front &lt; FrontStop?&quot;}
+  L --&gt;|No| K
+  L --&gt;|Yes| M[&quot;Post-stop correction and event confirmation&quot;]
+  M --&gt; N{&quot;Correction complete and event confirmed?&quot;}
+  N --&gt;|No| M
+  N --&gt;|Yes| O[&quot;Commit direction from confirmed event&quot;]
+  O --&gt; G
+  J --&gt;|Legacy DeadEnd| P[&quot;DeadEnd correction only&quot;]
+  P --&gt; Q{&quot;Correction complete?&quot;}
+  Q --&gt;|No| P
+  Q --&gt;|Yes| R[&quot;Reverse heading / opposite direction&quot;]
+  R --&gt; G
+  J --&gt;|Finish| S[&quot;Save attempt time and route flags&quot;]
+  S --&gt; B</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>6. Event recognition overview</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  FRAME[&quot;buildPerceptionFrame()&quot;] --&gt; FIN{&quot;Finish armed\nand finish geometry?&quot;}
+  FIN --&gt;|Yes| FINISH[&quot;Finish&quot;]
+  FIN --&gt;|No| DE{&quot;Front &lt; deadEnd\nand both front IR?&quot;}
+  DE --&gt;|Yes| DEAD[&quot;DeadEnd&quot;]
+  DE --&gt;|No| ST{&quot;Front IR pair on\nand both side walls?&quot;}
+  ST --&gt;|Yes| START[&quot;Start&quot;]
+  ST --&gt;|No| TURN{&quot;Turn geometry\nfrom ultrasonics?&quot;}
+  TURN --&gt;|Left| LT[&quot;LeftTurn&quot;]
+  TURN --&gt;|Right| RT[&quot;RightTurn&quot;]
+  TURN --&gt;|Both open + front close| TJ[&quot;TJunction&quot;]
+  TURN --&gt;|Side branch + front open| TJS[&quot;TJunctionStraight&quot;]
+  TURN --&gt;|None| COR[&quot;Corridor&quot;]</div>
+  </div>
+</body>
+</html>

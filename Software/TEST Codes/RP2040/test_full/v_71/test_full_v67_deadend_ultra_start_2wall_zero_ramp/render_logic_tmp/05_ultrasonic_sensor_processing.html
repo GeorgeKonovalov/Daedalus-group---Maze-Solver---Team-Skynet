@@ -1,0 +1,76 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Ultrasonic Sensor Processing</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;ATmega ultrasonic sender at 115200 baud&quot;] --&gt; B[&quot;UART line: D1,D2,D3,D4&quot;]
+  B --&gt; C[&quot;parseDistancesLine&quot;]
+  C --&gt; D{&quot;Line valid and numeric?&quot;}
+  D --&gt;|No| E[&quot;Reject sample and keep last valid data&quot;]
+  D --&gt;|Yes| F[&quot;Store raw N/E/S/W distances&quot;]
+  F --&gt; G[&quot;Averaging buffer with configurable US avg k&quot;]
+  G --&gt; H[&quot;Averaged N/E/S/W distances&quot;]
+  H --&gt; I[&quot;Map to robot heading frame&quot;]
+  I --&gt; J[&quot;front, left, right, back&quot;]
+  J --&gt; K{&quot;Sample fresh?&quot;}
+  K --&gt;|No| L[&quot;SensorWait / safety stop path&quot;]
+  K --&gt;|Yes| M[&quot;Used by events, PID source, wall PID, front correction&quot;]</div>
+  </div>
+</body>
+</html>

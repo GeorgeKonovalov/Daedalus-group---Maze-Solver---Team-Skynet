@@ -1,0 +1,76 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Correction Stage Event Priority</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Robot stopped because front &lt; FrontStop or turn-like event confirmed&quot;] --&gt; B{&quot;Was original stop legacy DeadEnd?&quot;}
+  B --&gt;|Yes| C[&quot;Correction only&quot;]
+  C --&gt; D[&quot;After correction, go opposite direction&quot;]
+  B --&gt;|No| E[&quot;Run correction and confirmation together&quot;]
+  E --&gt; F[&quot;Confirm LeftTurn / RightTurn / TJunction using existing logic&quot;]
+  E --&gt; G[&quot;Check ultrasonic dead-end only after correction&quot;]
+  G --&gt; H{&quot;front, left, and right &lt; WallThreshold?&quot;}
+  H --&gt;|Yes| I[&quot;Confirmed DeadEnd&quot;]
+  H --&gt;|No| J[&quot;Use confirmed Left/Right/TJ event&quot;]
+  F --&gt; J
+  I --&gt; K[&quot;Execute event immediately after correction&quot;]
+  J --&gt; K</div>
+  </div>
+</body>
+</html>

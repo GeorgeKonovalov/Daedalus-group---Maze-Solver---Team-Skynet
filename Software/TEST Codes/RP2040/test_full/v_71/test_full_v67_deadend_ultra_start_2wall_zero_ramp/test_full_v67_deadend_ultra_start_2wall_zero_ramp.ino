@@ -86,10 +86,10 @@ struct RuntimeSettings {
   int p_x1000 = 250;
   int i_x1000 = 00;     //   
   int d_x1000 = 20;     //   
-  int pid1WallP_x1000 = 350;
+  int pid1WallP_x1000 = 450;
   int pid1WallI_x1000 = 0;
   int pid1WallD_x1000 = 40;
-  int pid1WallRightP_x1000 = 350;
+  int pid1WallRightP_x1000 = 450;
   int pid1WallRightI_x1000 = 0;
   int pid1WallRightD_x1000 = 40;
   // Global IMU usage switch. 1 = allowed everywhere, 0 = disabled everywhere.
@@ -106,14 +106,14 @@ struct RuntimeSettings {
   int imuPidTestYawError_x100 = 300;
   int curveB_x100 = 100;
   int pidTwoWallFullError_x100 = 800;
-  int pidDeadband2W_x1000 = 50;
+  int pidDeadband2W_x1000 = 37;
   int pidDFilterAlpha_x1000 = 200;
   int pidWallDistance_x100 = 350;
   int pidLeftScale_x100 = 100;
   int pidRightScale_x100 = 100;
   int overallSpeedScale_x100 = 80;
-  int overallStart_x100 = 20;
-  int overallRampK_x100 = 50;
+  int overallStart_x100 = 30;
+  int overallRampK_x100 = 30;
   uint8_t leftTurnRampEnabled = 1;
   uint8_t rightTurnRampEnabled = 1;
   uint8_t tJunctionRampEnabled = 1;
@@ -122,8 +122,8 @@ struct RuntimeSettings {
   int approachSpeed_x100 = 28;
   int leftDriveScale_x100 = 100;
   int rightDriveScale_x100 = 100;
-  int servoStopFL_x1000 = 90629;
-  int servoStopFR_x1000 = 90900;
+  int servoStopFL_x1000 = 90045;
+  int servoStopFR_x1000 = 89530;
   int servoStopRR_x1000 = 89800;
   int servoStopRL_x1000 = 90000;
   int servoDeadbandFL_x100 = 0;
@@ -133,7 +133,7 @@ struct RuntimeSettings {
 
   int frontStopDistance_x100 = 1500;
   int frontHoldReference_x100 = 350;
-  int frontPidP_x1000 = 150;
+  int frontPidP_x1000 = 100;
   int frontPidI_x1000 = 0;
   int frontPidD_x1000 = 40;
   int turnYawTolerance_x100 = 300;
@@ -142,8 +142,8 @@ struct RuntimeSettings {
   int deadEndDistance_x100 = 2000;
   int finishDistance_x100 = 3000;
   int sensingInterval_x100 = 1;
-  int eventConfirmCount = 2;
-  int ultrasonicAvgCount = 3;
+  int eventConfirmCount = 1;
+  int ultrasonicAvgCount = 2;
   int waitBeforeTurn_x100 = 500;
 
   uint8_t routeMode = 1;

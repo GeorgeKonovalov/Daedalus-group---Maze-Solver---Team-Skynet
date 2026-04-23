@@ -1,0 +1,80 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Error Processing And Failsafes</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Runtime data&quot;] --&gt; B{&quot;Ultrasonic stale or invalid?&quot;}
+  B --&gt;|Yes| C[&quot;SensorWait, reset drive PID, stopAll&quot;]
+  B --&gt;|No| D[&quot;Continue event and PID logic&quot;]
+  D --&gt; E{&quot;IMU unavailable or disabled?&quot;}
+  E --&gt;|Yes| F[&quot;IMU yaw and lateral corrections forced to zero&quot;]
+  E --&gt;|No| G[&quot;IMU corrections allowed&quot;]
+  D --&gt; H[&quot;PID error handling&quot;]
+  H --&gt; I[&quot;Deadbands remove noise-level errors&quot;]
+  H --&gt; J[&quot;Integral terms are clamped&quot;]
+  H --&gt; K[&quot;Derivative terms are filtered&quot;]
+  H --&gt; L[&quot;Outputs clamped to command envelope&quot;]
+  D --&gt; M[&quot;Correction-stage event checks&quot;]
+  M --&gt; N[&quot;Legacy dead-end is not overridden&quot;]
+  M --&gt; O[&quot;New ultrasonic dead-end check only after non-dead-end stop&quot;]
+  L --&gt; P[&quot;Drive mixer limits impossible wheel commands&quot;]
+  P --&gt; Q[&quot;Per-wheel servo deadband forces neutral near zero&quot;]</div>
+  </div>
+</body>
+</html>

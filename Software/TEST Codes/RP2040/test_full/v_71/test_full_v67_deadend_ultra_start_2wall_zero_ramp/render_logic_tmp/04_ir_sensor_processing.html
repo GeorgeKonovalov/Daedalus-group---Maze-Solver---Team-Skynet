@@ -1,0 +1,78 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IR Sensor Processing</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Four IR digital inputs&quot;] --&gt; B[&quot;readIRSensors&quot;]
+  B --&gt; C[&quot;Build raw IR mask&quot;]
+  C --&gt; D[&quot;Stabilise mask over time&quot;]
+  D --&gt; E[&quot;relativeIrForHeading&quot;]
+  E --&gt; F[&quot;Front pair: frontLeft and frontRight&quot;]
+  E --&gt; G[&quot;Rear pair: rearLeft and rearRight&quot;]
+  F --&gt; H[&quot;Start check: both front IR triggered&quot;]
+  F --&gt; I[&quot;Legacy DeadEnd check: both front IR triggered&quot;]
+  F --&gt; J[&quot;Finish check: front pair open&quot;]
+  G --&gt; K[&quot;Finish check: rear pair open&quot;]
+  H --&gt; L[&quot;StartCorridor can be classified if side walls also exist&quot;]
+  I --&gt; M[&quot;DeadEnd can be classified if front ultrasonic is below dead-end threshold&quot;]
+  J --&gt; N[&quot;Finish needs all IR open plus ultrasonic openness&quot;]
+  K --&gt; N</div>
+  </div>
+</body>
+</html>

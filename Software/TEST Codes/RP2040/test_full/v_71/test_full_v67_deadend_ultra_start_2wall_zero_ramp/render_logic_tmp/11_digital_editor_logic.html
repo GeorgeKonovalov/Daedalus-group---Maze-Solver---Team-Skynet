@@ -1,0 +1,81 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Digital Editor Logic</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #wrap {
+      padding: 24px;
+      display: inline-block;
+      background: #ffffff;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'default',
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      gantt: { useMaxWidth: false }
+    });
+
+    window.addEventListener('load', async () => {
+      const host = document.querySelector('.mermaid');
+      const code = host.textContent;
+      const id = 'm' + Math.random().toString(36).slice(2);
+      const result = await mermaid.render(id, code);
+      host.innerHTML = result.svg;
+
+      const svg = host.querySelector('svg');
+      if (svg) {
+        const bbox = svg.getBBox();
+        const width = Math.ceil(bbox.width + 64);
+        const height = Math.ceil(bbox.height + 64);
+        document.body.style.width = width + 'px';
+        document.body.style.height = height + 'px';
+      }
+      document.body.setAttribute('data-rendered', 'true');
+    });
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="mermaid">flowchart TD
+  A[&quot;Menu item selected&quot;] --&gt; B[&quot;openDigitEditor&quot;]
+  B --&gt; C[&quot;Copy target value to tempValue&quot;]
+  C --&gt; D[&quot;Display padded number and selected digit underline&quot;]
+  D --&gt; E{&quot;Encoder moved?&quot;}
+  E --&gt;|No| H{&quot;Button event?&quot;}
+  E --&gt;|Yes| F{&quot;Digit unlocked?&quot;}
+  F --&gt;|No| G[&quot;Move selected digit underline&quot;]
+  F --&gt;|Yes| I[&quot;Increment or decrement selected digit&quot;]
+  I --&gt; J[&quot;Clamp tempValue to min/max&quot;]
+  G --&gt; H
+  J --&gt; H
+  H --&gt;|Short press| K[&quot;Toggle digit edit lock&quot;]
+  H --&gt;|Long press| L[&quot;Save tempValue to target&quot;]
+  L --&gt; M[&quot;commitRuntimeConfig&quot;]
+  M --&gt; N[&quot;Return to previous menu&quot;]
+  K --&gt; D
+  H --&gt;|None| D</div>
+  </div>
+</body>
+</html>
